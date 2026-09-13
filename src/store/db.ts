@@ -15,6 +15,8 @@ export interface ScoreEntry {
   added: number;
   lastPage: number;
   pageCount?: number;
+  /** Tempo last used with this piece. */
+  bpm?: number;
   /** Small JPEG data URL of page one, for the library grid. */
   thumb?: string;
   blob: Blob;

@@ -1,4 +1,5 @@
 import { ensureRunning, getMaster } from '../../audio/context';
+import { activeNotes, noteOn, stopAll } from '../../audio/droneBank';
 import { CLICK_SOUNDS, playClick } from '../../audio/voices';
 import { uid } from '../../core/format';
 import { clampBpm, defaultAccents, MAX_BPM, MIN_BPM, tapTempo, TEMPO_MARKINGS, tempoMarking, type AccentLevel } from '../../core/rhythm';
@@ -351,7 +352,14 @@ export function mountMetronome(root: HTMLElement) {
           'button',
           {
             class: `chip${p.bpm === m.bpm && p.beatsPerBar === m.beatsPerBar && p.beatUnit === m.beatUnit && p.subdivision === m.subdivision ? ' on' : ''}`,
-            onclick: () => setMetronome({ bpm: p.bpm, beatsPerBar: p.beatsPerBar, beatUnit: p.beatUnit, subdivision: p.subdivision, accents: [...p.accents] }),
+            onclick: async () => {
+              setMetronome({ bpm: p.bpm, beatsPerBar: p.beatsPerBar, beatUnit: p.beatUnit, subdivision: p.subdivision, accents: [...p.accents] });
+              // Presets can carry a drone, like a tuning or intonation routine.
+              if (p.drones?.length) {
+                stopAll();
+                for (const m of p.drones) await noteOn(m);
+              }
+            },
           },
           h('b', null, p.name),
           h('span', null, ` ${p.bpm}`),
@@ -365,9 +373,12 @@ export function mountMetronome(root: HTMLElement) {
             const cur = getSettings().metronome;
             const name = `${marking(cur.bpm)} ${cur.beatsPerBar}/${cur.beatUnit}`;
             updateSettings((s) => ({
-              metronomePresets: [...s.metronomePresets, { id: uid(), name, bpm: cur.bpm, beatsPerBar: cur.beatsPerBar, beatUnit: cur.beatUnit, subdivision: cur.subdivision, accents: [...cur.accents] }],
+              metronomePresets: [
+                ...s.metronomePresets,
+                { id: uid(), name, bpm: cur.bpm, beatsPerBar: cur.beatsPerBar, beatUnit: cur.beatUnit, subdivision: cur.subdivision, accents: [...cur.accents], drones: activeNotes() },
+              ],
             }));
-            toast(`Saved preset “${name}”`);
+            toast(activeNotes().length ? `Saved “${name}” with its drone` : `Saved preset “${name}”`);
           },
         },
         icon('save', 16),

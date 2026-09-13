@@ -16,6 +16,8 @@ export interface MetronomePreset {
   beatUnit: number;
   subdivision: number;
   accents: AccentLevel[];
+  /** MIDI notes of drones sounding when the preset was saved. */
+  drones?: number[];
 }
 
 export type BeatVisual = 'blocks' | 'pendulum' | 'pulse';

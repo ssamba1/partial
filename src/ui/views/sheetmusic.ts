@@ -4,7 +4,7 @@ import { formatCents, uid } from '../../core/format';
 import { hitStroke, simplify, stepHalfTurn, type PageView, type Stroke } from '../../core/ink';
 import { noteName, prettyName } from '../../core/notes';
 import { db, type ScoreEntry } from '../../store/db';
-import { getSettings } from '../../store/settings';
+import { getSettings, updateSettings } from '../../store/settings';
 import { iconButton, segmented, toast } from '../components';
 import { errorBox, h } from '../dom';
 import { icon, type IconName } from '../icons';
@@ -140,7 +140,7 @@ export function mountSheetMusic(root: HTMLElement) {
             'div',
             { class: 'score-meta' },
             h('b', { title: s.name }, s.name),
-            h('span', null, s.pageCount ? `Page ${s.lastPage} of ${s.pageCount}` : `Page ${s.lastPage}`),
+            h('span', null, `${s.pageCount ? `Page ${s.lastPage} of ${s.pageCount}` : `Page ${s.lastPage}`}${s.bpm ? ` · ${s.bpm} BPM` : ''}`),
           ),
           iconButton('trash', `Remove ${s.name}`, async () => {
             if (!confirm(`Remove "${s.name}" and its annotations from this device?`)) return;
@@ -160,7 +160,23 @@ export function mountSheetMusic(root: HTMLElement) {
   const pageLabel = h('span', { class: 'page-label' });
   const titleEl = h('strong', { class: 'score-title' });
   const tunerReadout = h('span', { class: 'mini-tuner' });
-  const clickBtn = h('button', { class: 'tool-btn', onclick: () => metronome.toggle(), title: 'Metronome' }, icon('metronome', 18), h('span', { class: 'mini-bpm' }));
+  const clickBtn = h(
+    'button',
+    {
+      class: 'tool-btn',
+      title: 'Metronome (remembers the tempo for this piece)',
+      onclick: () => {
+        const starting = !metronome.playing;
+        metronome.toggle();
+        if (starting && score) {
+          score.bpm = getSettings().metronome.bpm;
+          void db.put('scores', score);
+        }
+      },
+    },
+    icon('metronome', 18),
+    h('span', { class: 'mini-bpm' }),
+  );
   const tunerBtn = h('button', { class: 'tool-btn', onclick: () => void toggleTuner(), title: 'Tuner' }, icon('tuner', 18), tunerReadout);
   const nightBtn = h('button', { class: 'tool-btn', title: 'Night mode', 'aria-pressed': 'false', onclick: () => { night = !night; nightBtn.setAttribute('aria-pressed', String(night)); viewerEl.classList.toggle('night', night); } }, icon('moon', 18));
   const annotateBtn = h('button', { class: 'tool-btn', title: 'Annotate', 'aria-pressed': 'false', onclick: () => setAnnotating(!annotating) }, icon('pen', 18));
@@ -262,6 +278,10 @@ export function mountSheetMusic(root: HTMLElement) {
     }
     view = { kind: 'single', page: Math.min(Math.max(1, s.lastPage), doc.numPages) };
     titleEl.textContent = s.name;
+    if (s.bpm && s.bpm !== getSettings().metronome.bpm) {
+      updateSettings((st) => ({ metronome: { ...st.metronome, bpm: s.bpm! } }));
+      toast(`Metronome set to ${s.bpm} BPM, the tempo you used with this piece`);
+    }
     library.hidden = true;
     viewerEl.hidden = false;
     await renderPages();

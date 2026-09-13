@@ -187,6 +187,26 @@ await check('metronome schedules exact 100 BPM triplets', async () => {
   return `${gaps.length} gaps of 0.2 s`;
 });
 
+await check('metronome preset saves and restores its drone', async () => {
+  await open('sound');
+  const out = await run(`
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const svg = document.querySelector('.wheel-svg'); const wedge = document.querySelectorAll('.wedge')[9].getBoundingClientRect();
+    const ev = (t) => svg.dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: wedge.left + wedge.width / 2, clientY: wedge.top + wedge.height / 2, pointerId: 3 }));
+    ev('pointerdown'); ev('pointerup'); await wait(400);
+    location.hash = '#/metronome'; await wait(900);
+    [...document.querySelectorAll('.chip.add')].find((b) => b.textContent.includes('Save')).click(); await wait(300);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd' })); await wait(300);
+    const afterStop = document.querySelector('.dock-drone') ? 'still sounding' : 'stopped';
+    const chips = [...document.querySelectorAll('.preset-chips .chip:not(.add):not(.ghost)')];
+    chips[chips.length - 1].click(); await wait(600);
+    location.hash = '#/sound'; await wait(900);
+    return { afterStop, restored: document.querySelector('.sounding').innerText };`);
+  assert(out.afterStop === 'stopped', `drone not stopped: ${JSON.stringify(out)}`);
+  assert(/A3/.test(out.restored), `restored: ${out.restored}`);
+  return out.restored.replace(/\n/g, ' ');
+});
+
 await check('interval trainer: pure major third reads 0 vs just', async () => {
   await open('analysis');
   const text = await run(`${FAKE_MIC} [...document.querySelectorAll('.seg-btn')].find((b) => b.textContent === 'Intervals').click(); [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Start listening')).click(); const c = 261.6256; for (const f of [c, c * 1.25]) { window.__fake.o.frequency.value = f; await wait(1000); } await wait(500); return document.querySelector('.interval-row').innerText.replace(/\\n/g, ' ');`);

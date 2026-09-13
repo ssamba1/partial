@@ -93,11 +93,18 @@ The test suite (`npm test`, 76 tests) checks, among other things:
   exercise note sequences, staff positions, and the offline take report on a
   synthesized recording.
 
-Checked by driving the app in a headless browser with a synthesized microphone
-signal: tuner readings, click gating, count-in, click-track playback, recording
-and its intonation report, interval readings, sheet music import, annotation
-and half-page turns, and that all 16 click sounds render with similar peak
-levels.
+`npm run e2e` builds the app and drives it in headless Chrome or Edge with a
+synthesized microphone signal. It checks that every screen renders, tuner
+readings, the tuner running alongside the metronome, exact metronome timing,
+the interval trainer, recording with its intonation report, sheet music import
+with annotation and half-page turns, and loading offline with the server
+stopped. CI runs it on every push. During development the same approach was used
+to confirm count-in, click-track playback, video takes, and that all 16 click
+sounds render with similar peak levels.
+
+The synthesized microphone is an electrical signal, so it cannot show that the
+tuner ignores metronome clicks picked up acoustically; only the timing logic for
+that is unit tested.
 
 Not yet measured: accuracy on real instruments through real microphones, audio
 latency on phones, and behaviour on Safari and Firefox. The timbres and click
