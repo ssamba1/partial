@@ -611,61 +611,71 @@
   "id": "01-21",
   "file": "gaps/01-tuner.md",
   "title": "Top of the range is untested",
-  "status": "open"
+  "status": "fixed",
+  "note": "Sweep extended to C8 at 44.1 and 48 kHz; worst 0.70 cent, so no spectral refinement needed"
  },
  {
   "id": "01-22",
   "file": "gaps/01-tuner.md",
   "title": "Metronome gate ignores frame length and output latency",
-  "status": "open"
+  "status": "fixed",
+  "note": "nearClick takes output latency and frame length; tracker passes both"
  },
  {
   "id": "01-23",
   "file": "gaps/01-tuner.md",
   "title": "Gating stays on when the click is inaudible",
-  "status": "open"
+  "status": "fixed",
+  "note": "ClickAudibility checks 4 clicks for a 3 dB rise; gating turns off with a notice"
  },
  {
   "id": "01-24",
   "file": "gaps/01-tuner.md",
   "title": "The tuner reads the app's own reference tones",
-  "status": "open"
+  "status": "fixed",
+  "note": "Reference playing badge; clean readings within 3 cents of a string reference or hear target are dropped. partial: no loopback e2e"
  },
  {
   "id": "01-25",
   "file": "gaps/01-tuner.md",
   "title": "Follow drone can sustain itself forever",
-  "status": "open"
+  "status": "fixed",
+  "note": "FollowState releases the follow drone 0.6 s after the last voiced note"
  },
  {
   "id": "01-26",
   "file": "gaps/01-tuner.md",
   "title": "Follow drone and string references can be inaudible on phones",
-  "status": "open"
+  "status": "fixed",
+  "note": "Reference octave setting (same, up 1, up 2, auto 110 Hz) for follow drone, string references and hear target"
  },
  {
   "id": "01-27",
   "file": "gaps/01-tuner.md",
   "title": "Strings mode needle is noisier than chromatic mode",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tracker publishes smoothed displayFrequency; strings mode measures from it"
  },
  {
   "id": "01-28",
   "file": "gaps/01-tuner.md",
   "title": "Far-detuned strings are assigned to the wrong string and give the wrong direction",
-  "status": "open"
+  "status": "fixed",
+  "note": "StringFollower keeps the active string until 300 ms near another; Tune up/down hint beyond 50 cents"
  },
  {
   "id": "01-29",
   "file": "gaps/01-tuner.md",
   "title": "Manually selected string gives nonsense for other strings",
-  "status": "open"
+  "status": "fixed",
+  "note": "Sounds like the X string chip with tap to switch when a manual string is far off"
  },
  {
   "id": "01-30",
   "file": "gaps/01-tuner.md",
   "title": "Pluck and strike transients pollute readings",
-  "status": "open"
+  "status": "fixed",
+  "note": "OnsetGate skips 120 ms after a 6 dB rise for hold timer and session stats in strings mode"
  },
  {
   "id": "01-31",

@@ -69,6 +69,8 @@ export interface SmoothedReading {
   note: NoteReading | null;
   /** Display cents, smoothed further than `note.cents` so the needle glides instead of jittering. */
   displayCents: number;
+  /** The frequency the display cents stand for: as smooth as the needle, for measuring against other targets. */
+  displayFrequency: number | null;
 }
 
 /**
@@ -103,7 +105,7 @@ export class ReadingSmoother {
     if (frequency === null) {
       this.latch.reset();
       this.lastMidi = null;
-      return { frequency: null, note: null, displayCents: 0 };
+      return { frequency: null, note: null, displayCents: 0, displayFrequency: null };
     }
     const note = this.latch.read(frequency, tuning);
     if (this.lastMidi !== note.midi || dt <= 0) {
@@ -117,7 +119,7 @@ export class ReadingSmoother {
     }
     this.prevCents = note.cents;
     this.lastMidi = note.midi;
-    return { frequency, note, displayCents: this.display };
+    return { frequency, note, displayCents: this.display, displayFrequency: note.target * Math.pow(2, this.display / 1200) };
   }
 
   reset(): void {
@@ -126,5 +128,37 @@ export class ReadingSmoother {
     this.lastAt = null;
     this.lastVoiced = false;
     this.lastMidi = null;
+  }
+}
+
+/**
+ * Flags the start of a plucked or struck note, whose first moments are
+ * typically sharp: true for `ignoreMs` after the level rises more than
+ * `riseDb` within `windowMs`.
+ */
+export class OnsetGate {
+  private levels: { t: number; level: number }[] = [];
+  private onsetAt = -Infinity;
+
+  constructor(
+    private riseDb = 6,
+    private windowMs = 50,
+    private ignoreMs = 120,
+  ) {}
+
+  update(level: number, nowMs: number): boolean {
+    const floor = 1e-4;
+    const v = Math.max(floor, level);
+    while (this.levels.length && nowMs - this.levels[0].t > this.windowMs) this.levels.shift();
+    let low = Infinity;
+    for (const l of this.levels) low = Math.min(low, l.level);
+    this.levels.push({ t: nowMs, level: v });
+    if (low !== Infinity && v >= low * Math.pow(10, this.riseDb / 20)) this.onsetAt = nowMs;
+    return nowMs - this.onsetAt < this.ignoreMs;
+  }
+
+  reset(): void {
+    this.levels = [];
+    this.onsetAt = -Infinity;
   }
 }

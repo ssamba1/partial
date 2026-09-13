@@ -27,11 +27,26 @@ export function holdRepeatDelay(repeatCount: number): number {
   return 45;
 }
 
-/** True when `now` falls in the window around any click time, used to ignore the metronome in the mic. */
-export function nearClick(now: number, clickTimes: ArrayLike<number>, before = 0.01, after = 0.08): boolean {
+/**
+ * True when a click is in the analysis frame that ends at `now`, used to ignore
+ * the metronome in the mic. The frame holds the last `frameDuration` seconds of
+ * audio, and a click reaches the mic `latency` seconds after it is scheduled, so
+ * the frame is gated when a click time falls in
+ * [now - frameDuration - latency - after, now - latency + before].
+ */
+export function nearClick(
+  now: number,
+  clickTimes: ArrayLike<number>,
+  before = 0.01,
+  after = 0.08,
+  latency = 0,
+  frameDuration = 0,
+): boolean {
+  const from = now - frameDuration - latency - after;
+  const to = now - latency + before;
   for (let i = 0; i < clickTimes.length; i++) {
     const t = clickTimes[i];
-    if (now >= t - before && now <= t + after) return true;
+    if (t >= from && t <= to) return true;
   }
   return false;
 }

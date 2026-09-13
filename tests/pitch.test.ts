@@ -53,6 +53,25 @@ describe('YIN detector', () => {
     });
   }
 
+  for (const sr of [44100, 48000]) {
+    it(`top of the range, C7 to C8 (4186 Hz), within 1 cent at ${sr} Hz`, () => {
+      // At 48 kHz C8 is an 11-sample lag, so interpolation carries the whole reading. Measured worst: 0.70 cent at 44.1 kHz, 0.53 at 48 kHz.
+      const n = frameSizeFor(sr);
+      let worst = 0;
+      for (let midi = 96; midi <= 108; midi++) {
+        const f = 440 * Math.pow(2, (midi - 69) / 12);
+        for (const phase of [0, 0.3, 1.1, 2.5]) {
+          for (const detect of [detectPitch, detectPitchAdaptive]) {
+            const r = detect(tone(f, [1], 0.5, phase, sr, n), { sampleRate: sr });
+            expect(r, `midi ${midi}`).not.toBeNull();
+            worst = Math.max(worst, Math.abs(centsError(r!.frequency, f)));
+          }
+        }
+      }
+      expect(worst).toBeLessThan(1);
+    });
+  }
+
   it('frame size covers 30 Hz at every common rate', () => {
     expect(frameSizeFor(44100)).toBe(4096);
     expect(frameSizeFor(48000)).toBe(4096);

@@ -63,3 +63,79 @@ export function nearestString(
   });
   return best;
 }
+
+/**
+ * Chooses the string being tuned. The active string is kept while the pitch
+ * wanders between strings, as when a string far out of tune is brought up to
+ * pitch; it only changes after the pitch has sat within `nearCents` of another
+ * string (or more than `farCents` from the active one) for `switchMs`.
+ */
+export class StringFollower {
+  private active: number | null = null;
+  private candidate: number | null = null;
+  private candidateSince = 0;
+
+  constructor(
+    private switchMs = 300,
+    private nearCents = 50,
+    private farCents = 700,
+  ) {}
+
+  update(frequency: number, nowMs: number, instrument: StringInstrument, tuning: TuningSystem, pureFifths: boolean): StringReading {
+    const nearest = nearestString(frequency, instrument, tuning, pureFifths);
+    if (this.active === null || this.active >= instrument.strings.length) {
+      this.active = nearest.index;
+      this.candidate = null;
+      return nearest;
+    }
+    const target = stringFrequency(instrument, this.active, tuning, pureFifths);
+    const current = { index: this.active, cents: ratioToCents(frequency / target), target };
+    const wantsSwitch = nearest.index !== this.active && (Math.abs(nearest.cents) <= this.nearCents || Math.abs(current.cents) > this.farCents);
+    if (!wantsSwitch) {
+      this.candidate = null;
+      return current;
+    }
+    if (this.candidate !== nearest.index) {
+      this.candidate = nearest.index;
+      this.candidateSince = nowMs;
+      return current;
+    }
+    if (nowMs - this.candidateSince < this.switchMs) return current;
+    this.active = nearest.index;
+    this.candidate = null;
+    return nearest;
+  }
+
+  reset(): void {
+    this.active = null;
+    this.candidate = null;
+  }
+}
+
+/**
+ * With a string picked by hand, the string the player seems to be playing
+ * instead: returned when the reading is more than `offCents` from the chosen
+ * string and within `nearCents` of another.
+ */
+export function suggestString(
+  frequency: number,
+  instrument: StringInstrument,
+  chosen: number,
+  tuning: TuningSystem,
+  pureFifths: boolean,
+  offCents = 150,
+  nearCents = 50,
+): number | null {
+  const off = ratioToCents(frequency / stringFrequency(instrument, chosen, tuning, pureFifths));
+  if (Math.abs(off) <= offCents) return null;
+  const nearest = nearestString(frequency, instrument, tuning, pureFifths);
+  return nearest.index !== chosen && Math.abs(nearest.cents) <= nearCents ? nearest.index : null;
+}
+
+/** Plain direction for readings too far off for the needle, such as "Tune up 2.6 semitones". Null within 50 cents. */
+export function tuneHint(cents: number): string | null {
+  if (!Number.isFinite(cents) || Math.abs(cents) <= 50) return null;
+  const semis = Math.abs(cents) / 100;
+  const amount = semis < 1.05 ? `${Math.round(Math.abs(cents))} cents` : `${semis.toFixed(1)} semitones`;
+  return `Tune ${cents < 0 ? 'up' : 'down'} ${amount}`;
+}

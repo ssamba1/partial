@@ -174,9 +174,13 @@ await check('tuner reads a 14 cent sharp A', async () => {
 // runs alongside the metronome, not that click gating works (see the nearClick unit test).
 await check('tuner reads correctly with the metronome running', async () => {
   await open('tuner');
-  const text = await run(`${FAKE_MIC} window.__fake.o.frequency.value = 330; window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' })); document.querySelector('.tuner-stage').click(); await wait(2500); const t = document.querySelector('.note-line').textContent; window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' })); return t;`);
-  assert(text.startsWith('E4'), `note was ${text}`);
-  return text;
+  const out = await run(`${FAKE_MIC} window.__fake.o.frequency.value = 330; window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' })); document.querySelector('.tuner-stage').click(); await wait(2500); const t = document.querySelector('.note-line').textContent;
+    // Four clicks the mic never hears turn gating off, with a notice.
+    let notice = false; for (let i = 0; i < 20 && !notice; i++) { notice = [...document.querySelectorAll('.mic-warning')].some((p) => !p.hidden && /not heard/.test(p.textContent)); if (!notice) await wait(200); }
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' })); return { t, notice };`);
+  assert(out.t.startsWith('E4'), `note was ${out.t}`);
+  assert(out.notice, 'no notice that the click is not heard');
+  return `${out.t}, gating off`;
 });
 
 await check('tuner pauses in the background and shows a threshold on the level meter', async () => {

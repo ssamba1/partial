@@ -1733,6 +1733,14 @@ canvas.strobe-canvas {
 .ref-btn:disabled {
   opacity: 0.45;
 }
+.ref-badge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--text);
+  background: color-mix(in srgb, var(--brand) 14%, var(--surface));
+}
 .tuner-meta b {
   color: var(--text);
 }

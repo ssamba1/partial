@@ -23,6 +23,8 @@ export interface TrackerFrame {
   note: NoteReading | null;
   /** Display cents, smoothed further than `note.cents` so the needle glides instead of jittering. */
   displayCents: number;
+  /** Frequency matching `displayCents`, smoothed the same way. */
+  displayFrequency: number | null;
   /** True while the last reading is being held through a short dropout. */
   held: boolean;
   /** True if this frame was skipped because a metronome click was sounding. */
@@ -33,8 +35,8 @@ export interface TrackerOptions {
   tuning: () => TuningSystem;
   sensitivity?: () => number;
   damping?: () => Damping;
-  /** Return true to ignore the current frame (e.g. a metronome click is in the mic). */
-  gate?: (audioTime: number) => boolean;
+  /** Return true to ignore the current frame (e.g. a metronome click is in the mic). The frame covers `frameSeconds` of audio before `audioTime`. */
+  gate?: (audioTime: number, frameSeconds: number, level: number) => boolean;
   /** Input device id; read when the tracker starts. */
   deviceId?: () => string;
   /** Input channel of a stereo interface; read when the tracker starts. */
@@ -57,7 +59,7 @@ export class PitchTracker {
   private buffer = new Float32Array(4096);
   private smoothing = new ReadingSmoother();
   private listeners = new Set<(f: TrackerFrame) => void>();
-  private last: { note: NoteReading; frequency: number; clarity: number; displayCents: number; at: number } | null = null;
+  private last: { note: NoteReading; frequency: number; clarity: number; displayCents: number; displayFrequency: number | null; at: number } | null = null;
   private frameCount = 0;
   running = false;
 
@@ -133,14 +135,15 @@ export class PitchTracker {
       this.setHighpass();
       this.analyser.getFloatTimeDomainData(this.buffer);
       const now = performance.now();
-      const gated = this.opts.gate?.(ctx.currentTime) ?? false;
+      const level = acRms(this.buffer);
+      const gated = this.opts.gate?.(ctx.currentTime, this.buffer.length / ctx.sampleRate, level) ?? false;
 
       let note: NoteReading | null = null;
       let frequency: number | null = null;
       let clarity = 0;
       let displayCents = 0;
+      let displayFrequency: number | null = null;
       let held = false;
-      const level = acRms(this.buffer);
 
       // With no pitch present (room noise), analyse every other frame to save battery; a new note is still caught within ~33 ms.
       this.frameCount++;
@@ -157,14 +160,15 @@ export class PitchTracker {
           note = smoothed.note;
           frequency = smoothed.frequency;
           displayCents = smoothed.displayCents;
+          displayFrequency = smoothed.displayFrequency;
           clarity = result?.clarity ?? 0;
-          this.last = { note: smoothed.note, frequency: smoothed.frequency, clarity, displayCents, at: now };
+          this.last = { note: smoothed.note, frequency: smoothed.frequency, clarity, displayCents, displayFrequency, at: now };
         }
       }
 
       // Hold the last reading briefly through dropouts and gated frames, so the display doesn't flicker.
       if (!note && this.last && now - this.last.at < profile.holdMs) {
-        ({ note, frequency, clarity, displayCents } = this.last);
+        ({ note, frequency, clarity, displayCents, displayFrequency } = this.last);
         held = true;
       } else if (!note) {
         this.last = null;
@@ -180,6 +184,7 @@ export class PitchTracker {
         clarity,
         note,
         displayCents: note ? displayCents : 0,
+        displayFrequency: note ? displayFrequency : null,
         held,
         gated,
       };

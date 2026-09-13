@@ -69,6 +69,12 @@ export function activeNotes(): number[] {
   return [...active.keys()].sort((a, b) => a - b);
 }
 
+/** Frequencies of every sounding drone, so the tuner can tell it is hearing one. */
+export function activeFrequencies(): number[] {
+  const tuning = tuningOf(getSettings());
+  return [...active.keys()].map((midi) => midiToFrequency(midi, tuning));
+}
+
 export function setTimbreAll(timbre: Parameters<Drone['setTimbre']>[0]): void {
   active.forEach((d) => d.setTimbre(timbre));
 }

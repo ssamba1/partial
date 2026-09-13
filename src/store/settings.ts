@@ -5,6 +5,7 @@ import { dayKey } from '../core/practice';
 import type { AccentLevel, ClickTrack } from '../core/rhythm';
 import type { Damping } from '../core/tracking';
 import type { MicChannel } from '../core/mic';
+import type { ReferenceOctave } from '../core/selfsound';
 import type { DroneTimbre, ClickSound } from '../audio/voices';
 
 export type Activity = 'tuner' | 'metronome' | 'sound' | 'record' | 'analysis';
@@ -50,6 +51,11 @@ export interface Settings {
   pureFifths: boolean;
   /** Ignore the metronome click in the tuner. */
   ignoreClick: boolean;
+  /** Reference tones played by the tuner (string references, hear target, follow drone). */
+  reference: {
+    /** Raise low references so phone speakers can play them. */
+    octave: ReferenceOctave;
+  };
   metronome: {
     bpm: number;
     beatsPerBar: number;
@@ -114,6 +120,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stringInstrument: 'guitar',
   pureFifths: true,
   ignoreClick: true,
+  reference: { octave: 'same' },
   metronome: {
     bpm: 100,
     beatsPerBar: 4,
@@ -162,6 +169,7 @@ export function mergeSettings(stored: Partial<Settings>): Settings {
     ...stored,
     metronome: { ...DEFAULT_SETTINGS.metronome, ...stored.metronome },
     drone: { ...DEFAULT_SETTINGS.drone, ...stored.drone },
+    reference: { ...DEFAULT_SETTINGS.reference, ...stored.reference },
   };
 }
 

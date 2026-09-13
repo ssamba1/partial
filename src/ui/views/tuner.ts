@@ -3,11 +3,13 @@ import { MIN_FREQUENCY } from '../../audio/pitchTracker';
 import { Drone, playTone } from '../../audio/voices';
 import { icon } from '../icons';
 import { formatCents } from '../../core/format';
-import { nearestString, STRING_INSTRUMENTS, stringFrequency } from '../../core/instruments';
-import { noteOff, noteOn } from '../../audio/droneBank';
+import { STRING_INSTRUMENTS, StringFollower, stringFrequency, suggestString, tuneHint } from '../../core/instruments';
+import { activeFrequencies, noteOff, noteOn } from '../../audio/droneBank';
+import { FollowState, matchesReference, referenceOctaves, type ReferenceOctave } from '../../core/selfsound';
+import { OnsetGate } from '../../core/tracking';
 import { addReading, advanceStrobe, InTuneLatch, summarize, type Tendencies } from '../../core/intonation';
 import { calibratedThreshold, meterPosition, micWarnings, SignalStatus, zeroCrossingRate } from '../../core/mic';
-import { noteName, prettyName, TRANSPOSITIONS, transpose } from '../../core/notes';
+import { midiToFrequency, noteName, prettyName, TRANSPOSITIONS, transpose } from '../../core/notes';
 import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
 import { haptic, iconButton, openSheet, segmented } from '../components';
 import { cssVar, errorBox, fitCanvas, h, select } from '../dom';
@@ -147,6 +149,23 @@ function openTunerOptions(tools: OptionsTools) {
       h('input', { type: 'checkbox', role: 'switch', checked: s.followDrone, onchange: (e: Event) => updateSettings({ followDrone: (e.target as HTMLInputElement).checked }) }),
     ),
     h(
+      'div',
+      { class: 'field' },
+      h('span', { class: 'field-label' }, 'Reference octave'),
+      segmented(
+        [
+          { value: 'same', label: 'Same' },
+          { value: 'up1', label: 'Up 1' },
+          { value: 'up2', label: 'Up 2' },
+          { value: 'auto', label: 'Auto' },
+        ],
+        s.reference.octave,
+        (v) => updateSettings((cur) => ({ reference: { ...cur.reference, octave: v as ReferenceOctave } })),
+        'Reference octave',
+      ),
+      h('small', null, 'Phone speakers barely play low notes. Auto raises references below 110 Hz by octaves.'),
+    ),
+    h(
       'button',
       {
         class: 'pill-btn',
@@ -182,8 +201,12 @@ export function mountTuner(root: HTMLElement) {
   const inTuneLatch = new InTuneLatch(HOLD_SECONDS);
   const signal = new SignalStatus();
   let lastTendencyAt = 0;
-  let refDrone: { drone: Drone; index: number; timeout: number } | null = null;
+  let refDrone: { drone: Drone; index: number; frequency: number; timeout: number } | null = null;
+  /** The "Hear target" tone while it sounds. */
+  let targetTone: { frequency: number; until: number } | null = null;
   let manualString: number | null = null;
+  const stringFollower = new StringFollower();
+  const onsets = new OnsetGate();
   let disposed = false;
 
   /* ----- Display elements ----- */
@@ -258,7 +281,9 @@ export function mountTuner(root: HTMLElement) {
         if (!lastTarget) return;
         const ctx = await ensureRunning();
         const s = getSettings();
-        playTone(ctx, getMaster(), ctx.currentTime + 0.02, lastTarget, 1.6, s.drone.timbre, Math.max(0.5, s.drone.volume));
+        const frequency = lastTarget * Math.pow(2, referenceOctaves(lastTarget, s.reference.octave));
+        playTone(ctx, getMaster(), ctx.currentTime + 0.02, frequency, 1.6, s.drone.timbre, Math.max(0.5, s.drone.volume));
+        targetTone = { frequency, until: performance.now() + 1700 };
       },
     },
     icon('sound', 14),
@@ -269,6 +294,20 @@ export function mountTuner(root: HTMLElement) {
   const clipLight = h('span', { class: 'clip-light', title: 'Input clipping' });
   const levelStatus = h('span', { class: 'level-status', 'aria-live': 'polite' });
   const noticeSlot = h('div');
+  const clickNotice = h('p', { class: 'mic-warning', role: 'note', hidden: true }, 'Metronome not heard by mic, reading continuously.');
+  const refBadge = h('span', { class: 'ref-badge', hidden: true }, 'Reference playing');
+  let suggested: number | null = null;
+  const suggestChip = h('button', {
+    class: 'chip',
+    hidden: true,
+    onclick: () => {
+      if (suggested === null) return;
+      manualString = suggested;
+      suggested = null;
+      suggestChip.hidden = true;
+      renderStrings(manualString, null);
+    },
+  });
   const trace = h('canvas', { class: 'trace', 'aria-hidden': 'true' });
   const errorSlot = h('div');
 
@@ -327,38 +366,35 @@ export function mountTuner(root: HTMLElement) {
   }
 
   /* ----- Drone that follows you ----- */
-  let followMidi: number | null = null;
-  /** Whether the follow drone created its current note (a user-started drone on the same note is left alone). */
+  const follow = new FollowState();
+  /** The drone note actually sounding (after any octave shift), and whether the follow drone created it. */
+  let followSounding: number | null = null;
   let followOwned = false;
-  let candidateMidi: number | null = null;
-  let candidateSince = 0;
-  function stopFollow() {
-    if (followMidi !== null && followOwned) noteOff(followMidi);
-    followMidi = null;
+  function release(midi: number | undefined) {
+    if (midi === undefined || followSounding === null) return;
+    if (followOwned) noteOff(followSounding);
+    followSounding = null;
     followOwned = false;
-    candidateMidi = null;
+  }
+  function stopFollow() {
+    release(follow.reset().stop);
   }
   function followNote(concertMidi: number | null, time: number) {
     if (!getSettings().followDrone) {
       stopFollow();
       return;
     }
-    if (concertMidi === null) return;
-    if (concertMidi !== candidateMidi) {
-      candidateMidi = concertMidi;
-      candidateSince = time;
-      return;
-    }
-    if (time - candidateSince >= 0.35 && followMidi !== concertMidi) {
-      if (followMidi !== null && followOwned) noteOff(followMidi);
-      const midi = concertMidi;
-      followMidi = midi;
-      followOwned = false;
-      void noteOn(midi).then((created) => {
-        if (followMidi === midi) followOwned = created;
-        else if (created) noteOff(midi); // moved on to another note while this one was starting
-      });
-    }
+    const step = follow.update(concertMidi, time);
+    release(step.stop);
+    if (step.start === undefined) return;
+    const s = getSettings();
+    const midi = step.start + 12 * referenceOctaves(midiToFrequency(step.start, tuningOf(s)), s.reference.octave);
+    followSounding = midi;
+    followOwned = false;
+    void noteOn(midi).then((created) => {
+      if (followSounding === midi) followOwned = created;
+      else if (created) noteOff(midi); // moved on to another note while this one was starting
+    });
   }
 
   /* ----- Strings mode ----- */
@@ -368,13 +404,14 @@ export function mountTuner(root: HTMLElement) {
     getSettings().stringInstrument,
     (v) => {
       manualString = null;
+      stringFollower.reset();
       updateSettings({ stringInstrument: v });
     },
     { 'aria-label': 'Instrument', class: 'compact' },
   );
-  const autoChip = h('button', { class: 'chip', onclick: () => { manualString = null; renderStrings(null, null); } }, 'Auto');
+  const autoChip = h('button', { class: 'chip', onclick: () => { manualString = null; stringFollower.reset(); renderStrings(null, null); } }, 'Auto');
   const pureChip = h('label', { class: 'chip toggle' }, h('input', { type: 'checkbox', checked: getSettings().pureFifths, onchange: (e: Event) => updateSettings({ pureFifths: (e.target as HTMLInputElement).checked }) }), 'Pure fifths');
-  const stringsPanel = h('div', { class: 'strings-panel' }, h('div', { class: 'row wrap tight' }, instrumentSelect, autoChip, pureChip), stringsRow);
+  const stringsPanel = h('div', { class: 'strings-panel' }, h('div', { class: 'row wrap tight' }, instrumentSelect, autoChip, pureChip, suggestChip), stringsRow);
 
   function instrument() {
     return STRING_INSTRUMENTS.find((i) => i.id === getSettings().stringInstrument) ?? STRING_INSTRUMENTS[0];
@@ -429,8 +466,10 @@ export function mountTuner(root: HTMLElement) {
     if (disposed) return;
     // A second tap may have started a reference while this one was waiting; replace it rather than leak it.
     if (refDrone) stopRef();
-    const drone = new Drone(ctx, getMaster(), stringFrequency(inst, i, tuningOf(s), s.pureFifths), 'strings', 0.7);
-    refDrone = { drone, index: i, timeout: window.setTimeout(stopRef, 4000) };
+    const base = stringFrequency(inst, i, tuningOf(s), s.pureFifths);
+    const frequency = base * Math.pow(2, referenceOctaves(base, s.reference.octave));
+    const drone = new Drone(ctx, getMaster(), frequency, 'strings', 0.7);
+    refDrone = { drone, index: i, frequency, timeout: window.setTimeout(stopRef, 4000) };
     renderStrings(i, null);
   }
 
@@ -450,6 +489,7 @@ export function mountTuner(root: HTMLElement) {
       timer.stop();
       stopFollow();
       signal.reset();
+      onsets.reset();
       noticeSlot.replaceChildren();
       root.querySelector('.tuner')?.classList.remove('listening');
       hint.textContent = 'Tap to start';
@@ -529,50 +569,78 @@ export function mountTuner(root: HTMLElement) {
     if (levelStatus.textContent !== status.message) levelStatus.textContent = status.message;
     clipLight.classList.toggle('on', status.clip);
     const semis = TRANSPOSITIONS.find((t) => t.id === s.transposition)?.semitones ?? 0;
+    const nowMs = performance.now();
+
+    // The tuner's own reference tones reach the mic too: say so, and drop readings that are clearly the reference.
+    if (targetTone && nowMs > targetTone.until) targetTone = null;
+    const oneShotRefs = [refDrone?.frequency ?? 0, targetTone?.frequency ?? 0];
+    refBadge.hidden = !oneShotRefs.some((x) => x > 0) && !activeFrequencies().length;
+    const hearingSelf = !!f.frequency && !f.held && matchesReference(f.frequency, f.clarity, oneShotRefs);
+    const note = hearingSelf ? null : f.note;
+    const held = !hearingSelf && f.held;
+    clickNotice.hidden = tracker.clickHearing.state !== 'inaudible';
+    // A pluck starts sharp: skip its first moments for the in-tune hold and the session score.
+    const transient = onsets.update(f.level, nowMs) && s.tunerMode === 'strings';
 
     let cents: number | null = null;
     let displayMidi: number | null = null;
     let target = 0;
+    let hint: string | null = null;
 
-    if (f.note && f.frequency) {
+    if (note && f.frequency) {
       if (s.tunerMode === 'strings') {
         const inst = instrument();
-        const reading = manualString !== null
-          ? { index: manualString, target: stringFrequency(inst, manualString, tuningOf(s), s.pureFifths), cents: 0 }
-          : nearestString(f.frequency, inst, tuningOf(s), s.pureFifths);
-        reading.cents = 1200 * Math.log2(f.frequency / reading.target);
-        cents = reading.cents;
-        target = reading.target;
-        displayMidi = inst.strings[reading.index];
-        renderStrings(reading.index, cents);
+        const tuning = tuningOf(s);
+        // The smoothed frequency, so the needle is as steady here as in chromatic mode.
+        const freq = f.displayFrequency ?? f.frequency;
+        let index: number;
+        if (manualString !== null) {
+          index = manualString;
+          target = stringFrequency(inst, index, tuning, s.pureFifths);
+          if (!held) suggested = suggestString(freq, inst, index, tuning, s.pureFifths);
+        } else {
+          const reading = stringFollower.update(freq, nowMs, inst, tuning, s.pureFifths);
+          index = reading.index;
+          target = reading.target;
+        }
+        cents = 1200 * Math.log2(freq / target);
+        displayMidi = inst.strings[index];
+        renderStrings(index, cents);
+        hint = tuneHint(cents);
         if (Math.abs(cents) > 50) cents = Math.sign(cents) * 50;
       } else {
         cents = f.displayCents;
-        target = f.note.target;
-        displayMidi = transpose(f.note.midi, semis);
+        target = note.target;
+        displayMidi = transpose(note.midi, semis);
       }
     } else if (s.tunerMode === 'strings') {
       renderStrings(manualString, null);
     }
+    if (s.tunerMode !== 'strings' || manualString === null) suggested = null;
+    suggestChip.hidden = suggested === null;
+    if (suggested !== null) {
+      const text = `Sounds like the ${prettyName(noteName(instrument().strings[suggested], s.flats, false))} string`;
+      if (suggestChip.textContent !== text) suggestChip.textContent = text;
+    }
 
-    if (!f.held && !f.gated) {
+    if (!held && !f.gated && !hearingSelf && !transient) {
       recordTuningFrame(cents);
       // At most 30 readings a second, so a 120 Hz screen does not count double.
-      const nowSec = performance.now() / 1000;
-      if (s.tunerMode === 'chromatic' && f.note && displayMidi !== null && nowSec - lastTendencyAt >= 1 / 30) {
+      const nowSec = nowMs / 1000;
+      if (s.tunerMode === 'chromatic' && note && displayMidi !== null && nowSec - lastTendencyAt >= 1 / 30) {
         lastTendencyAt = nowSec;
-        pendingTend = addReading(pendingTend, ((displayMidi % 12) + 12) % 12, f.note.cents);
+        pendingTend = addReading(pendingTend, ((displayMidi % 12) + 12) % 12, note.cents);
         pendingCount++;
         if (pendingCount % 30 === 0) renderTendencies();
       }
     }
-    followNote(f.note && !f.held ? f.note.midi : null, f.time);
-    if (s.tunerDisplay === 'strobe') drawStrobe(cents, performance.now());
+    followNote(note && !held ? note.midi : null, f.time);
+    if (s.tunerDisplay === 'strobe') drawStrobe(cents, nowMs);
     history.push({ t: f.time, cents });
     while (history.length && f.time - history[0].t > HISTORY_SECONDS) history.shift();
 
     // Hysteresis keeps the in-tune state from flickering at the edge of the range.
-    const { inTune, hold, fire } = inTuneLatch.update(cents, displayMidi, performance.now() / 1000, s.tolerance);
+    const { inTune, hold, fire } = transient ? { inTune: false, hold: 0, fire: false } : inTuneLatch.update(cents, displayMidi, nowMs / 1000, s.tolerance);
     if (fire) haptic(12);
 
     if (displayMidi === null || cents === null) {
@@ -592,10 +660,10 @@ export function mountTuner(root: HTMLElement) {
     octaveEl.textContent = String(Math.floor(displayMidi / 12) - 1);
     // Words as well as colour, so the state reads without relying on colour vision.
     const direction = `${Math.abs(Math.round(cents))}¢ ${cents > 0 ? 'sharp' : 'flat'}`;
-    centsEl.textContent = inTune ? 'in tune' : direction;
+    centsEl.textContent = hint ?? (inTune ? 'in tune' : direction);
     barNote.textContent = `${pretty}${Math.floor(displayMidi / 12) - 1}`;
-    barCents.textContent = inTune ? `${formatCents(cents)} in tune` : direction;
-    if (!f.held) announce(`${pretty.replace('♯', ' sharp').replace('♭', ' flat')}, ${inTune ? 'in tune' : direction.replace('¢', ' cents')}`);
+    barCents.textContent = hint ?? (inTune ? `${formatCents(cents)} in tune` : direction);
+    if (!held) announce(`${pretty.replace('♯', ' sharp').replace('♭', ' flat')}, ${hint ?? (inTune ? 'in tune' : direction.replace('¢', ' cents'))}`);
     strobeNote.textContent = barNote.textContent;
     strobeCents.textContent = barCents.textContent;
     barNeedle.style.left = `${50 + Math.max(-50, Math.min(50, cents))}%`;
@@ -606,7 +674,7 @@ export function mountTuner(root: HTMLElement) {
     stage?.classList.toggle('in-tune', inTune);
     stage?.classList.toggle('sharp', !inTune && cents > 0);
     stage?.classList.toggle('flat', !inTune && cents < 0);
-    if (!f.held) {
+    if (!held) {
       lastTarget = target;
       refBtn.disabled = false;
     }
@@ -683,9 +751,10 @@ export function mountTuner(root: HTMLElement) {
     stringsPanel,
     display,
     h('div', { class: 'level-row' }, h('div', { class: 'level', role: 'meter', 'aria-label': 'Input level' }, levelFill, levelTick), clipLight, levelStatus),
-    h('div', { class: 'meta-row' }, freqEl, refBtn),
+    h('div', { class: 'meta-row' }, freqEl, refBadge, refBtn),
     errorSlot,
     noticeSlot,
+    clickNotice,
     h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, h('span', null, 'Last 10 seconds'), h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace),
     tendPanel,
   );
