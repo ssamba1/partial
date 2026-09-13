@@ -71,6 +71,18 @@ export class InTuneLatch {
   }
 }
 
+/** One line describing a stretch of readings for screen readers, such as "Last 10 s: mostly 6 cents sharp". */
+export function traceSummary(points: readonly { cents: number | null }[], tolerance: number, seconds = 10): string {
+  const voiced = points.map((p) => p.cents).filter((c): c is number => c !== null && Number.isFinite(c)).sort((a, b) => a - b);
+  const head = `Last ${seconds} s`;
+  if (voiced.length < 3) return `${head}: no note`;
+  const mid = voiced.length >> 1;
+  const median = voiced.length % 2 ? voiced[mid] : (voiced[mid - 1] + voiced[mid]) / 2;
+  if (Math.abs(median) <= tolerance) return `${head}: mostly in tune`;
+  const r = Math.round(Math.abs(median));
+  return `${head}: mostly ${r} ${r === 1 ? 'cent' : 'cents'} ${median > 0 ? 'sharp' : 'flat'}`;
+}
+
 export interface NoteStat {
   count: number;
   sum: number;

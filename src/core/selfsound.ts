@@ -144,3 +144,16 @@ export class FollowState {
     return { stop };
   }
 }
+
+/**
+ * Sonified tuner: seconds between cue ticks, or null when in tune or silent.
+ * Ticks come faster as the error grows, from `slow` at the tolerance edge to
+ * `fast` at 50 cents. Kept slow enough that gating the ticks leaves readings.
+ */
+export function sonifyInterval(cents: number | null, tolerance: number, slow = 0.9, fast = 0.3): number | null {
+  if (cents === null || !Number.isFinite(cents)) return null;
+  const off = Math.abs(cents);
+  if (off <= tolerance) return null;
+  const x = Math.min(1, (off - tolerance) / Math.max(1, 50 - tolerance));
+  return slow + (fast - slow) * x;
+}

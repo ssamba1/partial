@@ -681,61 +681,71 @@
   "id": "01-31",
   "file": "gaps/01-tuner.md",
   "title": "Reference tone cannot be configured",
-  "status": "open"
+  "status": "fixed",
+  "note": "Reference sound, length (short, hold, repeat) and volume options; Hear target toggles with aria-pressed"
  },
  {
   "id": "01-32",
   "file": "gaps/01-tuner.md",
   "title": "No custom string tunings, capo or per-string offsets",
-  "status": "open"
+  "status": "fixed",
+  "note": "Custom tunings editor with per-string notes, cent offsets and capo; stored and sanitized in settings"
  },
  {
   "id": "01-33",
   "file": "gaps/01-tuner.md",
   "title": "Common instruments and tunings are missing",
-  "status": "open"
+  "status": "blocked",
+  "note": "Needs a verified list of instrument tunings from a primary source; custom tunings and scrolling strings already support them"
  },
  {
   "id": "01-34",
   "file": "gaps/01-tuner.md",
   "title": "Pure fifths offered for mandolin",
-  "status": "open"
+  "status": "fixed",
+  "note": "Pure fifths removed for mandolin since frets are equal tempered"
  },
  {
   "id": "01-35",
   "file": "gaps/01-tuner.md",
   "title": "String buttons wrap into two rows on phones",
-  "status": "open"
+  "status": "fixed",
+  "note": "Strings sit in one grid row sized by count, scrolling sideways above 8; e2e checks one row at 320 px"
  },
  {
   "id": "01-36",
   "file": "gaps/01-tuner.md",
   "title": "String buttons show state by colour only and have no labels",
-  "status": "open"
+  "status": "fixed",
+  "note": "Check or arrow glyph per string, aria-label with note and cents, aria-pressed for manual pick. partial: no axe-core check"
  },
  {
   "id": "01-37",
   "file": "gaps/01-tuner.md",
   "title": "The whole display is one button that hides the readout",
-  "status": "open"
+  "status": "fixed",
+  "note": "Separate Start or Stop button with aria-pressed; readout no longer inside a button. partial: not checked with NVDA or VoiceOver"
  },
  {
   "id": "01-38",
   "file": "gaps/01-tuner.md",
   "title": "Trace and tendencies have no text alternative",
-  "status": "open"
+  "status": "fixed",
+  "note": "Hidden text summary of the trace updated each second; tendencies tap for detail and have a hidden table"
  },
  {
   "id": "01-39",
   "file": "gaps/01-tuner.md",
   "title": "No non-speech audio feedback for players who cannot see the screen",
-  "status": "open"
+  "status": "fixed",
+  "note": "Sound cues option: rising or falling chirps, faster when further off, silent in tune, gated from the tracker"
  },
  {
   "id": "01-40",
   "file": "gaps/01-tuner.md",
   "title": "No forced-colors (high contrast) support",
-  "status": "open"
+  "status": "fixed",
+  "note": "forced-colors styles for ring, bar, meter, strings, switches and heat map; e2e emulates forced colors. partial: not checked in real Windows High Contrast"
  },
  {
   "id": "01-41",

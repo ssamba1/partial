@@ -7,7 +7,22 @@ export interface StringInstrument {
   strings: number[];
   /** Bowed strings are traditionally tuned in pure 3:2 fifths from the A string. */
   pureFifthsFrom?: number;
+  /** Per-string offsets in cents added to each target. */
+  centOffsets?: number[];
+  /** Capo fret: every string sounds this many semitones higher. */
+  capo?: number;
 }
+
+/** A tuning the player made, stored in settings. */
+export interface CustomTuning {
+  id: string;
+  label: string;
+  strings: number[];
+  centOffsets?: number[];
+  capo?: number;
+}
+
+export const CUSTOM_TUNING_PREFIX = 'custom:';
 
 export const STRING_INSTRUMENTS: StringInstrument[] = [
   { id: 'guitar', label: 'Guitar (standard)', strings: [40, 45, 50, 55, 59, 64] },
@@ -21,13 +36,43 @@ export const STRING_INSTRUMENTS: StringInstrument[] = [
   { id: 'viola', label: 'Viola', strings: [48, 55, 62, 69], pureFifthsFrom: 69 },
   { id: 'cello', label: 'Cello', strings: [36, 43, 50, 57], pureFifthsFrom: 57 },
   { id: 'doublebass', label: 'Double bass', strings: [28, 33, 38, 43] },
-  { id: 'mandolin', label: 'Mandolin', strings: [55, 62, 69, 76], pureFifthsFrom: 69 },
+  // No pure fifths: frets are equal tempered, so fretted notes would disagree with pure open strings.
+  { id: 'mandolin', label: 'Mandolin', strings: [55, 62, 69, 76] },
   { id: 'banjo', label: 'Banjo (open G)', strings: [67, 50, 55, 59, 62] },
 ];
 
 const PURE_FIFTH_OFFSET = ratioToCents(3 / 2) - 700;
 
-/** Target frequency for one string, honouring pure fifths when requested. */
+/** Built-in instruments followed by the player's own tunings. */
+export function allInstruments(custom: readonly CustomTuning[] = []): StringInstrument[] {
+  return [...STRING_INSTRUMENTS, ...custom.map((t) => ({ ...t, id: CUSTOM_TUNING_PREFIX + t.id }))];
+}
+
+/** A stored tuning with its values brought into range, or null if it has no usable strings. */
+export function sanitizeTuning(t: Partial<CustomTuning> | null | undefined): CustomTuning | null {
+  if (!t || typeof t.id !== 'string' || !t.id || !Array.isArray(t.strings)) return null;
+  const strings = t.strings.filter((m) => Number.isFinite(m)).map((m) => Math.max(12, Math.min(108, Math.round(m)))).slice(0, 48);
+  if (!strings.length) return null;
+  const offsets = strings.map((_, k) => {
+    const v = Number(t.centOffsets?.[k] ?? 0);
+    return Number.isFinite(v) ? Math.max(-50, Math.min(50, v)) : 0;
+  });
+  const capo = Math.max(0, Math.min(12, Math.round(Number(t.capo) || 0)));
+  return {
+    id: t.id,
+    label: String(t.label ?? '').trim().slice(0, 40) || 'My tuning',
+    strings,
+    ...(offsets.some((v) => v !== 0) ? { centOffsets: offsets } : {}),
+    ...(capo ? { capo } : {}),
+  };
+}
+
+/** Sounding MIDI note of one string, capo included. */
+export function stringMidi(instrument: StringInstrument, index: number): number {
+  return instrument.strings[index] + (instrument.capo ?? 0);
+}
+
+/** Target frequency for one string, honouring capo, per-string offsets and pure fifths when requested. */
 export function stringFrequency(
   instrument: StringInstrument,
   index: number,
@@ -35,11 +80,13 @@ export function stringFrequency(
   pureFifths: boolean,
 ): number {
   const midi = instrument.strings[index];
-  const base = midiToFrequency(midi, { ...tuning, temperament: 'equal' });
-  if (!pureFifths || instrument.pureFifthsFrom === undefined) return base;
-  const fifths = (midi - instrument.pureFifthsFrom) / 7;
-  if (!Number.isInteger(fifths)) return base;
-  return base * Math.pow(2, (fifths * PURE_FIFTH_OFFSET) / 1200);
+  const base = midiToFrequency(stringMidi(instrument, index), { ...tuning, temperament: 'equal' });
+  let cents = instrument.centOffsets?.[index] ?? 0;
+  if (pureFifths && instrument.pureFifthsFrom !== undefined) {
+    const fifths = (midi - instrument.pureFifthsFrom) / 7;
+    if (Number.isInteger(fifths)) cents += fifths * PURE_FIFTH_OFFSET;
+  }
+  return base * Math.pow(2, cents / 1200);
 }
 
 export interface StringReading {

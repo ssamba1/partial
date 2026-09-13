@@ -203,6 +203,44 @@ await check('tuner pauses in the background and shows a threshold on the level m
   return out.resumed ? 'paused, then resumed' : 'paused, waiting for a tap';
 });
 
+await check('tuner strings fit one row at 320 px, with labels and a pressed Start button', async () => {
+  await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 700, deviceScaleFactor: 1, mobile: true });
+  try {
+    await open('tuner');
+    const out = await run(`${FAKE_MIC} window.__fake.o.frequency.value = 196;
+      [...document.querySelectorAll('.seg-btn')].find((b) => b.dataset.value === 'strings').click(); await wait(300);
+      document.querySelector('.tuner-toggle').click(); await wait(2000);
+      const btns = [...document.querySelectorAll('.string-btn')];
+      const tops = new Set(btns.map((b) => b.offsetTop));
+      const right = Math.max(...btns.map((b) => b.getBoundingClientRect().right));
+      const pressed = document.querySelector('.tuner-toggle').getAttribute('aria-pressed');
+      const labels = btns.map((b) => b.getAttribute('aria-label'));
+      document.querySelector('.tuner-toggle').click();
+      [...document.querySelectorAll('.seg-btn')].find((b) => b.dataset.value === 'chromatic').click();
+      return { count: btns.length, rows: tops.size, right, width: document.documentElement.clientWidth, pressed, labels, stageTag: document.querySelector('.tuner-stage').tagName };`);
+    assert(out.count === 6 && out.rows === 1, `strings in ${out.rows} rows`);
+    assert(out.right <= out.width, `strings overflow: ${out.right} > ${out.width}`);
+    assert(out.pressed === 'true', `Start button pressed state ${out.pressed}`);
+    assert(out.stageTag === 'DIV', `stage is ${out.stageTag}`);
+    assert(out.labels.some((l) => /^G3 string, (in tune|\d+ cents (sharp|flat)), play reference$/.test(l)), `labels ${out.labels}`);
+    return out.labels.find((l) => l.startsWith('G3'));
+  } finally {
+    await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  }
+});
+
+await check('forced colors: the in-tune zone is dashed in a system colour', async () => {
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+  try {
+    await open('tuner');
+    const out = await run(`const z = getComputedStyle(document.querySelector('.ring-zone')); return { dash: z.strokeDasharray, stroke: z.stroke };`);
+    assert(out.dash && out.dash !== 'none', `zone dash ${out.dash}`);
+    return `${out.stroke}, dash ${out.dash}`;
+  } finally {
+    await send('Emulation.setEmulatedMedia', { features: [] });
+  }
+});
+
 await check('metronome schedules exact 100 BPM triplets', async () => {
   await open('metronome');
   const gaps = await run(`

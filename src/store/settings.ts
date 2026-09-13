@@ -6,6 +6,7 @@ import type { AccentLevel, ClickTrack } from '../core/rhythm';
 import type { Damping } from '../core/tracking';
 import type { MicChannel } from '../core/mic';
 import type { ReferenceOctave } from '../core/selfsound';
+import { sanitizeTuning, type CustomTuning } from '../core/instruments';
 import type { DroneTimbre, ClickSound } from '../audio/voices';
 
 export type Activity = 'tuner' | 'metronome' | 'sound' | 'record' | 'analysis';
@@ -55,7 +56,16 @@ export interface Settings {
   reference: {
     /** Raise low references so phone speakers can play them. */
     octave: ReferenceOctave;
+    /** Sound of the reference; 'drone' uses the drone timbre. */
+    timbre: DroneTimbre | 'drone';
+    /** A few seconds, until tapped again, or a pluck every 2 s until tapped. */
+    length: 'short' | 'hold' | 'repeat';
+    volume: number;
   };
+  /** String tunings made by the player. */
+  customTunings: CustomTuning[];
+  /** Audio cues for tuning without looking: faster ticks for bigger errors. */
+  sonify: boolean;
   metronome: {
     bpm: number;
     beatsPerBar: number;
@@ -120,7 +130,9 @@ export const DEFAULT_SETTINGS: Settings = {
   stringInstrument: 'guitar',
   pureFifths: true,
   ignoreClick: true,
-  reference: { octave: 'same' },
+  reference: { octave: 'same', timbre: 'drone', length: 'short', volume: 0.7 },
+  customTunings: [],
+  sonify: false,
   metronome: {
     bpm: 100,
     beatsPerBar: 4,
@@ -170,6 +182,7 @@ export function mergeSettings(stored: Partial<Settings>): Settings {
     metronome: { ...DEFAULT_SETTINGS.metronome, ...stored.metronome },
     drone: { ...DEFAULT_SETTINGS.drone, ...stored.drone },
     reference: { ...DEFAULT_SETTINGS.reference, ...stored.reference },
+    customTunings: Array.isArray(stored.customTunings) ? stored.customTunings.map(sanitizeTuning).filter((x): x is CustomTuning => x !== null) : [],
   };
 }
 
