@@ -1,38 +1,108 @@
 # Resonare
 
-A free, open-source practice app for musicians: tuner, metronome, drone, click
-tracks, recorder, pitch analysis and a sheet music reader, in one installable
-web app. No accounts, no ads, no tracking. Everything you save stays in your
-browser.
+A free, open-source practice studio for musicians: tuner, metronome, drones,
+exercise player, click tracks, recorder with intonation reports, pitch analysis
+and a sheet music reader with annotation, in one installable web app. No
+accounts, no ads, no subscriptions, no tracking. Everything you save stays on
+your device.
 
 Resonare is an independent project and is not affiliated with TonalEnergy.
 
 ## Features
 
-| Screen | What it does |
-| --- | --- |
-| Tuner | Chromatic tuner with needle, cents readout and pitch trace. A4 from 400 to 480 Hz, transposing instruments (B&#9837;, E&#9837;, F, G, A), equal / just / Pythagorean / quarter-comma meantone temperaments on any tonic, adjustable in-tune range and mic sensitivity. |
-| Metronome | 20 to 400 BPM, any meter, subdivisions up to 6, per-beat accent / normal / silent, tap tempo, four click sounds, speed trainer, keyboard control. Keeps playing across screens. |
-| Drone | Sustained reference pitches, single notes, fifths, octaves or triads, seven timbres. Follows the tuner's A4 and temperament. |
-| Click track | Sections with their own bars, tempo, meter, subdivision and optional tempo ramp, plus a count-in. Saved locally. |
-| Record | Record practice with an input meter and optional metronome, play back, rename, download, delete. |
-| Analysis | Live pitch-over-time graph with in-tune band and accuracy stats, spectrum with harmonic markers, harmonic levels, waveform. |
-| Sheet music | Import PDFs, one or two pages, full screen, page turns by tap, arrow keys, Page Up/Down or a Bluetooth pedal. Mini metronome and tuner overlay. Remembers the last page. |
-| Practice | Daily practice time, streak, 28-day chart, theme, export / import of settings. |
+### Tuner
+- Ring, bar and strobe displays. The ring rotates the detected note to the top,
+  sweeps sharp (clockwise) or flat, and fills an inner ring while you hold the
+  note in tune.
+- States are shown in words and arrows as well as colour.
+- String tuner for guitar (standard, Drop D, DADGAD, half step down), bass 4 and
+  5, ukulele, violin, viola, cello, double bass, mandolin and banjo. Bowed
+  strings can use pure 3:2 fifths. Tap a string to hear its reference.
+- A4 from 400 to 480 Hz in 0.5 Hz steps; transposing instruments (B&#9837;,
+  E&#9837;, F, G, A); equal, just, Pythagorean, quarter-comma meantone,
+  Werckmeister III, Vallotti and Young II temperaments on any tonic.
+- Note names in English, solf&egrave;ge or German (H).
+- In-tune range from &plusmn;1 to &plusmn;10 cents, three steadiness modes, and
+  mic sensitivity presets.
+- Ignores the metronome: the tuner skips the instant each click sounds, so it
+  keeps reading while the metronome plays.
+- "Drone follows you" sounds the reference for the note you hold.
+- Intonation tendencies: average cents and spread per note, saved across
+  sessions.
 
-It installs as a PWA and works offline after the first visit.
+### Metronome
+- Tempo dial (drag, scroll wheel or arrow keys), hold-to-repeat +/-, tap tempo,
+  a tempo sheet with tempo names and half/double time.
+- Any meter from a tile picker, subdivisions up to 6, tap beats to cycle accent,
+  normal and silent.
+- Beat display as blocks, pendulum or pulse; optional full-screen flash.
+- 16 synthesized click sounds, loudness-matched.
+- Practice tools: count-in, polyrhythm layer, gap trainer (play N bars, silence
+  M), random beat silence, speed trainer, stop after N bars.
+- Presets, and a mini metronome docked on every screen.
 
-## What is measured
+### Sound
+- Drones from a chromatic wheel (drag around it to glide) or a piano keyboard,
+  as single notes, fifths, octaves or triads, in 11 synthesized timbres.
+- Exercise player: major and minor scales, pentatonic, chromatic, arpeggios and
+  scales in thirds over 1 to 3 octaves, up, down or both, at the metronome
+  tempo, with a root drone, count-in, click and loop.
 
-The test suite (`npm test`) checks the pitch detector against synthesized tones:
-pure sines for every semitone from E1 (41 Hz) to C7 (2093 Hz) land within
-0.5 cents, harmonic-rich tones with a weak fundamental land within 5 cents with
-no octave errors, and silence and white noise return no pitch. Temperament
-offsets are checked against their defining ratios, and click-track timing
-against hand-computed event times.
+### Analysis
+- Pitch over time, note staff, interval trainer (each interval against equal
+  temperament and its just ratio), spectrum with harmonic markers, harmonic
+  levels and waveform. Swipe between views; tap to freeze.
 
-These are synthetic signals. Accuracy on real instruments through a real
-microphone has not been benchmarked yet.
+### Record
+- Live waveform, optional metronome, playback at 0.5x to 1.25x with pitch
+  preserved, download.
+- Intonation report per take: percent in tune, average cents, held notes, and
+  the notes furthest from centre with their times.
+
+### Click tracks
+- Sections with bars, tempo, meter, subdivision and tempo ramps, shown on a
+  proportional timeline with a playhead. Templates and looping.
+
+### Sheet music
+- PDF library with thumbnails and drag-and-drop import.
+- Single page, two pages, or half-page turns.
+- Pen, highlighter and eraser with undo, saved per page. Night mode.
+- Page turns by tap, keyboard, Bluetooth page turners, or MIDI pedals.
+
+### Everywhere
+- Tuning sheet from the top bar, session in-tune meter, keyboard shortcuts
+  (M metronome, D stop drones, 1 to 8 screens, ? help).
+- MIDI device learning for next/previous page, start/stop, metronome and tap.
+- Screen reader announcements of tuner readings.
+- Practice history: activity rings, streaks, 12-week calendar, daily goal, JSON
+  backup and CSV export.
+- Light and dark themes. Installs as a PWA and works offline after the first
+  visit.
+
+## What is measured, and what is not
+
+The test suite (`npm test`, 76 tests) checks, among other things:
+
+- Pitch detection on synthesized tones: pure sines for every semitone from E1
+  (41 Hz) to C7 (2093 Hz) within 0.5 cents; harmonic-rich tones with a weak
+  fundamental within 5 cents with no octave errors; silence and white noise give
+  no pitch.
+- Temperaments against their defining ratios, and that each well temperament
+  distributes exactly one Pythagorean comma.
+- Rhythm timing, polyrhythm offsets, gap and random muting, interval sizes,
+  exercise note sequences, staff positions, and the offline take report on a
+  synthesized recording.
+
+Checked by driving the app in a headless browser with a synthesized microphone
+signal: tuner readings, click gating, count-in, click-track playback, recording
+and its intonation report, interval readings, sheet music import, annotation
+and half-page turns, and that all 16 click sounds render with similar peak
+levels.
+
+Not yet measured: accuracy on real instruments through real microphones, audio
+latency on phones, and behaviour on Safari and Firefox. The timbres and click
+sounds are synthesized approximations, not recorded samples. Ableton Link and
+spoken count-ins are not implemented.
 
 ## Development
 
@@ -49,19 +119,21 @@ Microphone access needs `https` or `localhost`.
 ### Layout
 
 ```
-src/core/    pure logic, no DOM (notes, pitch detection, rhythm, spectrum)
-src/audio/   Web Audio glue (context, scheduler, metronome, voices, pitch tracker)
-src/store/   settings (localStorage) and recordings / PDFs (IndexedDB)
-src/ui/      DOM helpers, router, one file per screen
+src/core/    pure logic, no DOM (notes, pitch, rhythm, intervals, intonation, ink, midi)
+src/audio/   Web Audio (context, scheduler, metronome, voices, drones, pitch tracker)
+src/store/   settings (localStorage) and recordings, scores, annotations (IndexedDB)
+src/ui/      components, icons, shell pieces, one file per screen
 tests/       vitest, core logic
 public/      manifest, icons, service worker
 ```
 
-The pitch detector is YIN (de Cheveign&eacute; and Kawahara, 2002). The metronome
-uses a lookahead scheduler on the AudioContext clock, so clicks are placed with
-sample accuracy regardless of UI load. PDF rendering uses
+The pitch detector is YIN: A. de Cheveign&eacute; and H. Kawahara, "YIN, a
+fundamental frequency estimator for speech and music", J. Acoust. Soc. Am.
+111(4), 1917-1930 (2002), [doi:10.1121/1.1458024](https://doi.org/10.1121/1.1458024).
+The metronome schedules clicks ahead of time on the AudioContext clock, so
+timing does not depend on UI load. PDF rendering uses
 [pdf.js](https://github.com/mozilla/pdf.js), loaded only when the sheet music
-screen opens.
+screen opens. Fonts are Inter and Space Grotesk (SIL Open Font License).
 
 ## License
 
