@@ -188,7 +188,8 @@ export function noteName(midi: number, flats = false, withOctave = true, notatio
 
 /** Pretty accidentals for display: C# -> C♯, Bb -> B♭ (never touches the German note B). */
 export function prettyName(name: string): string {
-  return name.replace('#', '♯').replace(/(?<=\p{L})b(?=-?\d|$)/u, '♭');
+  // Capture group instead of a lookbehind, which older Safari cannot parse.
+  return name.replace('#', '♯').replace(/(\p{L})b(-?\d|$)/u, '$1♭$2');
 }
 
 /** Written note for a transposing instrument. */

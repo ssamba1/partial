@@ -401,7 +401,8 @@ export function mountAnalysis(root: HTMLElement) {
       ctx.fillStyle = grad;
       const bw = barW * 0.62;
       ctx.beginPath();
-      ctx.roundRect(x + (barW - bw) / 2, hh - 28 - bh, bw, bh, [6, 6, 2, 2]);
+      if (ctx.roundRect) ctx.roundRect(x + (barW - bw) / 2, hh - 28 - bh, bw, bh, [6, 6, 2, 2]);
+      else ctx.rect(x + (barW - bw) / 2, hh - 28 - bh, bw, bh);
       ctx.fill();
       ctx.fillStyle = cssVar('--muted');
       ctx.fillText(String(hm.number), x + barW / 2, hh - 10);
