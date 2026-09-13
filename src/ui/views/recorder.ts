@@ -344,7 +344,7 @@ export function mountRecorder(root: HTMLElement) {
   async function renderList() {
     let items: RecordingEntry[];
     try {
-      items = await db.list<RecordingEntry>('recordings');
+      items = await db.list('recordings');
     } catch (err) {
       list.replaceChildren(errorBox((err as Error).message));
       return;

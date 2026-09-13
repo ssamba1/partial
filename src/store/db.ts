@@ -1,3 +1,5 @@
+import type { Stroke } from '../core/ink';
+
 export interface RecordingEntry {
   id: string;
   name: string;
@@ -12,13 +14,29 @@ export interface ScoreEntry {
   name: string;
   added: number;
   lastPage: number;
+  pageCount?: number;
+  /** Small JPEG data URL of page one, for the library grid. */
+  thumb?: string;
   blob: Blob;
 }
 
-type StoreName = 'recordings' | 'scores';
+export interface AnnotationEntry {
+  /** `${scoreId}:${page}` */
+  id: string;
+  scoreId: string;
+  page: number;
+  strokes: Stroke[];
+}
+
+interface Stores {
+  recordings: RecordingEntry;
+  scores: ScoreEntry;
+  annotations: AnnotationEntry;
+}
+type StoreName = keyof Stores;
 
 const DB_NAME = 'resonare';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function open(): Promise<IDBDatabase> {
@@ -33,6 +51,7 @@ function open(): Promise<IDBDatabase> {
         const db = req.result;
         if (!db.objectStoreNames.contains('recordings')) db.createObjectStore('recordings', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('scores')) db.createObjectStore('scores', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('annotations')) db.createObjectStore('annotations', { keyPath: 'id' }).createIndex('scoreId', 'scoreId');
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => {
@@ -58,16 +77,21 @@ function request<T>(store: StoreName, mode: IDBTransactionMode, fn: (s: IDBObjec
 }
 
 export const db = {
-  list<T extends RecordingEntry | ScoreEntry>(store: StoreName): Promise<T[]> {
-    return request<T[]>(store, 'readonly', (s) => s.getAll());
+  list<K extends StoreName>(store: K): Promise<Stores[K][]> {
+    return request<Stores[K][]>(store, 'readonly', (s) => s.getAll());
   },
-  get<T>(store: StoreName, id: string): Promise<T | undefined> {
-    return request<T | undefined>(store, 'readonly', (s) => s.get(id));
+  get<K extends StoreName>(store: K, id: string): Promise<Stores[K] | undefined> {
+    return request<Stores[K] | undefined>(store, 'readonly', (s) => s.get(id));
   },
-  put(store: StoreName, value: RecordingEntry | ScoreEntry): Promise<void> {
+  put<K extends StoreName>(store: K, value: Stores[K]): Promise<void> {
     return request<IDBValidKey>(store, 'readwrite', (s) => s.put(value)).then(() => undefined);
   },
   delete(store: StoreName, id: string): Promise<void> {
     return request<undefined>(store, 'readwrite', (s) => s.delete(id));
+  },
+  /** Removes every annotation page belonging to a score. */
+  async deleteAnnotationsFor(scoreId: string): Promise<void> {
+    const keys = await request<IDBValidKey[]>('annotations', 'readonly', (s) => s.index('scoreId').getAllKeys(IDBKeyRange.only(scoreId)));
+    await Promise.all(keys.map((k) => db.delete('annotations', String(k))));
   },
 };
