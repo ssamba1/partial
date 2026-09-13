@@ -1101,49 +1101,57 @@
   "id": "01-91",
   "file": "gaps/01-tuner.md",
   "title": "No timpani mode",
-  "status": "open"
+  "status": "fixed",
+  "note": "Timpani mode reads the pitch of each strike from a long FFT and holds it until the next strike; partial: not validated on recorded timpani"
  },
  {
   "id": "01-92",
   "file": "gaps/01-tuner.md",
   "title": "No bell or handbell partial analysis",
-  "status": "open"
+  "status": "fixed",
+  "note": "Bells mode lists the 5 strongest peaks; pick the nominal and the others are named hum, prime, tierce, quint (Hibbert); partial: not validated on real bells"
  },
  {
   "id": "01-93",
   "file": "gaps/01-tuner.md",
   "title": "No piano stretch tuning",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: piano stretch fits inharmonicity B from struck notes (Fletcher 1964) and can apply a stretch curve to the tuner; partial: not validated on a real piano"
  },
  {
   "id": "01-94",
   "file": "gaps/01-tuner.md",
   "title": "No beat-rate meter",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: beat meter counts slow beats (up to about 6 per second) between two close tones"
  },
  {
   "id": "01-95",
   "file": "gaps/01-tuner.md",
   "title": "No aural temperament-setting aid",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tuning sheet shows beat rates of fifths and major thirds F3 to F4 for non-equal temperaments"
  },
  {
   "id": "01-96",
   "file": "gaps/01-tuner.md",
   "title": "No instrument tendency reference or guided tuning",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: known tendencies for trumpet, clarinet and sax (cited) with a guided check, plus a tip under the reading; partial: flute and other instruments unsourced, exact trumpet octaves inferred from 'low'"
  },
  {
   "id": "01-97",
   "file": "gaps/01-tuner.md",
   "title": "No guitar intonation (saddle) check",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: guitar intonation compares the 12th fret note with the 12th fret harmonic and says which way to move the saddle (Fender)"
  },
  {
   "id": "01-98",
   "file": "gaps/01-tuner.md",
   "title": "No explicit measure button",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: Measure 3 s gives mean Hz and cents with spread; checked in e2e"
  },
  {
   "id": "01-99",
@@ -1156,31 +1164,36 @@
   "id": "01-100",
   "file": "gaps/01-tuner.md",
   "title": "No vocal range finder",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: vocal range finder saves lowest and highest steady notes; partial: using the range in matching exercises belongs to 03-95"
  },
  {
   "id": "01-101",
   "file": "gaps/01-tuner.md",
   "title": "No choir pitch-drift check",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: choir drift takes the key note at the start and end and reports how far the pitch moved"
  },
  {
   "id": "01-102",
   "file": "gaps/01-tuner.md",
   "title": "No ensemble tuning log for teachers",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: tuning checks log with names, sort and CSV export"
  },
  {
   "id": "01-103",
   "file": "gaps/01-tuner.md",
   "title": "No dual tuner",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tools: dual tuner reads left and right input channels side by side; partial: not tested with stereo hardware"
  },
  {
   "id": "01-104",
   "file": "gaps/01-tuner.md",
   "title": "No haptic direction cues",
-  "status": "open"
+  "status": "fixed",
+  "note": "Option: vibration cues, two short pulses when sharp, one long pulse when flat, none when in tune; partial: vibration not testable on this machine"
  },
  {
   "id": "01-105",

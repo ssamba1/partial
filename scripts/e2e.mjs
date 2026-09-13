@@ -108,7 +108,7 @@ const FAKE_MIC = `
       if (cons && cons.video) return real({ video: cons.video });
       const d = c.createMediaStreamDestination(); g.connect(d); return d.stream;
     };
-    return { c, o };
+    return { c, o, g };
   })();
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 `;
@@ -290,6 +290,54 @@ await check('tuner: written and concert pitch, quarter tones in 24 equal, and Sa
     return `${sax.note} (${sax.concert}), ${q.note}, ${pa.note}`;
   } finally {
     await setPrefs({ tunerMode: 'chromatic', transposition: 'C', edo: 12, spelling: 'sharps' });
+  }
+});
+
+await check('tuner tools: measure 3 s, and timpani reads a struck note once', async () => {
+  const setPrefs = (p) => run(`const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k) || '{}'); Object.assign(s, ${JSON.stringify(p)}); localStorage.setItem(k, JSON.stringify(s));`);
+  await open('tuner');
+  try {
+    const measured = await run(`${FAKE_MIC} window.__fake.o.frequency.value = 440 * Math.pow(2, 6/1200);
+      document.querySelector('[aria-label="Tools"]').click(); await wait(300);
+      const cards = document.querySelectorAll('.tool-card').length;
+      const card = document.querySelector('.tool-card'); card.open = true;
+      [...card.querySelectorAll('button')].find((b) => b.textContent === 'Measure 3 s').click();
+      for (let i = 0; i < 40 && !/readings/.test(card.querySelector('.tool-result').textContent); i++) await wait(200);
+      const text = card.querySelector('.tool-result').textContent;
+      document.querySelector('.sheet-layer [aria-label="Close"]')?.click(); await wait(300);
+      document.querySelector('.tuner-toggle').click(); await wait(200);
+      return { cards, text };`);
+    assert(measured.cards === 10, `tool cards ${measured.cards}`);
+    assert(/^A4: 441\.\d\d Hz/.test(measured.text) && /\+[5-7]¢|\+[5-7]\.\d¢/.test(measured.text), `measure ${measured.text}`);
+    await setPrefs({ tunerMode: 'timpani' });
+    await open('tuner');
+    const drum = await run(`${FAKE_MIC} const { c, o, g } = window.__fake; o.type = 'sine'; o.frequency.value = 130.81 * Math.pow(2, -8/1200);
+      g.gain.setValueAtTime(0.0003, c.currentTime);
+      document.querySelector('.tuner-toggle').click(); await wait(1000);
+      const before = document.querySelector('.note-line').textContent;
+      const t = c.currentTime; g.gain.setValueAtTime(0.3, t); g.gain.setTargetAtTime(0.03, t + 0.02, 1.5);
+      await wait(1500);
+      const after = document.querySelector('.note-line').textContent + ' ' + document.querySelector('.big-cents').textContent;
+      document.querySelector('.tuner-toggle').click(); await wait(200);
+      return { before, after };`);
+    assert(drum.after.startsWith('C3') && /8¢ flat|[79]¢ flat/.test(drum.after), `timpani ${JSON.stringify(drum)}`);
+    const all5 = (list) => list.some((t) => t.startsWith('A3'));
+    await setPrefs({ tunerMode: 'bells' });
+    await open('tuner');
+    const bells = await run(`${FAKE_MIC} const { c, o, g } = window.__fake; g.gain.cancelScheduledValues(0); g.gain.value = 0.25; o.type = 'sawtooth'; o.frequency.value = 220;
+      document.querySelector('.tuner-toggle').click(); await wait(2500);
+      const all = [...document.querySelectorAll('.bell-peak')].map((x) => x.textContent);
+      const idx = all.findIndex((t) => t.startsWith('A4 '));
+      if (idx >= 0) document.querySelectorAll('.bell-peak')[idx]?.click();
+      await wait(600);
+      const out = { count: all.length, all, idx, note: document.querySelector('.note-line').textContent };
+      document.querySelector('.tuner-toggle').click(); await wait(200);
+      return out;`);
+    assert(bells.count === 5 && all5(bells.all) && bells.all[0].startsWith('A3 ') && bells.idx >= 0 && bells.note.startsWith('A4'), `bells ${JSON.stringify(bells)}`);
+    return `${measured.text}; timpani ${drum.after}; bells ${bells.count} peaks`;
+  } finally {
+    await run(`if (window.__fake) { window.__fake.o.type = 'sawtooth'; window.__fake.g.gain.cancelScheduledValues(0); window.__fake.g.gain.value = 0.25; }`);
+    await setPrefs({ tunerMode: 'chromatic' });
   }
 });
 

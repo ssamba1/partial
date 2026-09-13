@@ -722,6 +722,8 @@ export function mountTuner(root: HTMLElement) {
   let bellPeaks: Peak[] = [];
   let bellRefHz: number | null = null;
   let bellsAt = 0;
+  // Time the signal went above the threshold; the long FFT window must fill with sound before it is read.
+  let bellsLoudSince: number | null = null;
   const bellList = h('div', { class: 'bell-list' });
   const bellsPanel = h('div', { class: 'strings-panel bells-panel' }, h('small', { class: 'muted' }, 'Strike the bell. The five strongest partials are listed. Tap one to tune it; the others are named from the partial you pick as the nominal.'), bellList);
   function renderBells() {
@@ -1207,10 +1209,13 @@ export function mountTuner(root: HTMLElement) {
         spec = { kind: 'note', midi: r.midi };
       }
     } else if (s.tunerMode === 'bells') {
-      if (f.level >= s.sensitivity && nowMs - bellsAt > 400) {
-        bellsAt = nowMs;
+      if (f.level < s.sensitivity) bellsLoudSince = null;
+      else bellsLoudSince ??= nowMs;
+      // 32768 samples last 743 ms at 44.1 kHz and less at higher rates.
+      if (bellsLoudSince !== null && nowMs - bellsLoudSince >= 750 && nowMs - bellsAt > 400) {
         const wide = tracker.wideSamples();
         if (wide) {
+          bellsAt = nowMs;
           const peaks = spectrumPeaks(wide.samples, wide.sampleRate, { count: 5, minHz: 60, maxHz: 5000 });
           if (peaks.length) {
             bellPeaks = peaks;
