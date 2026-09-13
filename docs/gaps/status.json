@@ -1241,61 +1241,71 @@
   "id": "02-1",
   "file": "gaps/02-metronome.md",
   "title": "Tempo changes can lag up to two beats at slow tempos",
-  "status": "open"
+  "status": "fixed",
+  "note": "New MetronomeSequence builds each beat only when it enters the lookahead, so tempo applies from the next beat. Unit tested 20 to 200 BPM."
  },
  {
   "id": "02-2",
   "file": "gaps/02-metronome.md",
   "title": "Changing subdivision mid-beat schedules a stray, out-of-order click",
-  "status": "open"
+  "status": "fixed",
+  "note": "Subdivision is read per beat when the beat is built; no stray or out-of-order clicks. Unit tested."
  },
  {
   "id": "02-3",
   "file": "gaps/02-metronome.md",
   "title": "Meter changes apply mid-bar with odd beat numbers",
-  "status": "open"
+  "status": "fixed",
+  "note": "Meter, accents and grouping are locked per bar and change at the barline. Unit tested."
  },
  {
   "id": "02-4",
   "file": "gaps/02-metronome.md",
   "title": "The polyrhythm layer is scheduled a whole bar ahead",
-  "status": "open"
+  "status": "fixed",
+  "note": "Poly is a continuous cycle built per beat with exact integer math, so it follows tempo and turns off at once. Unit tested."
  },
  {
   "id": "02-5",
   "file": "gaps/02-metronome.md",
   "title": "Stop does not silence clicks that are already scheduled",
-  "status": "open"
+  "status": "fixed",
+  "note": "Each run plays through its own gain node that fades over 5 ms and disconnects on stop."
  },
  {
   "id": "02-6",
   "file": "gaps/02-metronome.md",
   "title": "No guard when the timer runs late: clicks in the past play in a burst",
-  "status": "open"
+  "status": "fixed",
+  "note": "Late events more than 20 ms past move the run forward instead of bursting. Unit tested with a fake clock."
  },
  {
   "id": "02-7",
   "file": "gaps/02-metronome.md",
   "title": "Background tab timer throttling can break the click",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: ticks come from an inline Worker with a 1 s lookahead while hidden; the 10 minute hidden-tab log test was not run."
  },
  {
   "id": "02-8",
   "file": "gaps/02-metronome.md",
   "title": "Beat visuals pile up and flash in a burst when the tab returns",
-  "status": "open"
+  "status": "fixed",
+  "note": "Visual events are queued and any more than 50 ms stale are dropped. Unit tested."
  },
  {
   "id": "02-9",
   "file": "gaps/02-metronome.md",
   "title": "Visuals use setTimeout and forced reflows instead of a frame loop on the audio clock",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: one rAF loop mapped with getOutputTimestamp, animations restarted via getAnimations instead of reflows; frame-to-click offset not measured."
  },
  {
   "id": "02-10",
   "file": "gaps/02-metronome.md",
   "title": "A suspended or interrupted AudioContext is not detected",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: statechange sets a stalled state, a banner offers resume from the next barline; no e2e ctx.suspend check (context is not exposed to the page)."
  },
  {
   "id": "02-11",

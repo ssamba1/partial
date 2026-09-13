@@ -1,4 +1,13 @@
-export type AccentLevel = 'accent' | 'normal' | 'silent';
+export type AccentLevel = 'accent' | 'medium' | 'normal' | 'soft' | 'silent';
+
+/** Every accent level, loudest first. */
+export const ACCENT_LEVELS: AccentLevel[] = ['accent', 'medium', 'normal', 'soft', 'silent'];
+
+/** The next level when a beat is tapped: loudest to silent, then back to accent. */
+export function nextAccent(level: AccentLevel): AccentLevel {
+  const i = ACCENT_LEVELS.indexOf(level);
+  return ACCENT_LEVELS[(i + 1) % ACCENT_LEVELS.length];
+}
 
 export interface MeterConfig {
   bpm: number;
@@ -24,6 +33,17 @@ export interface ClickEvent {
   countIn: boolean;
   /** Silenced by the gap trainer or random muting; still shown visually. */
   muted?: boolean;
+  /** Extra layers mixed with the main clicks. Missing = the main click. */
+  layer?: 'poly' | 'layer' | 'timeline';
+  /** Gain relative to the main volume (layers). */
+  gain?: number;
+  /** Seconds until the next click in the same layer, so long sounds can be cut short. */
+  gap?: number;
+  /** Index and count of a poly pulse or timeline cell. */
+  pulse?: number;
+  pulses?: number;
+  /** Main clicks in this beat. */
+  units?: number;
 }
 
 export const MIN_BPM = 20;

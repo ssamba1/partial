@@ -1,7 +1,7 @@
 import { Metronome } from '../audio/metronome';
 import { PitchTracker, type TrackerOptions } from '../audio/pitchTracker';
 import { getContext } from '../audio/context';
-import { nearClick } from '../core/gestures';
+import { ClickLog, nearClick } from '../core/gestures';
 import { ClickAudibility, SelfSounds } from '../core/selfsound';
 import { getSettings, logPractice, subscribeSettings, tuningOf, updateSettings, type Activity } from '../store/settings';
 
@@ -10,12 +10,51 @@ export const metronome = new Metronome({
   ...getSettings().metronome,
 });
 
+/* ---------- Transport: only one timing engine plays at a time ---------- */
+
+type TransportOwner = 'metronome' | 'clicktrack' | 'exercise';
+let transport: { owner: TransportOwner; stop: () => void } | null = null;
+
+/**
+ * Called by each timing engine when it starts. Whichever engine held the
+ * transport is stopped, so two clicks never play out of phase.
+ */
+export function claimTransport(owner: TransportOwner, stop: () => void): void {
+  const prev = transport;
+  transport = { owner, stop };
+  if (prev && prev.owner !== owner) prev.stop();
+}
+
+/** Called when an engine stops; does nothing if another engine has taken over. */
+export function releaseTransport(owner: TransportOwner): void {
+  if (transport?.owner === owner) transport = null;
+}
+
+/** Which engine is playing, if any. */
+export function transportOwner(): TransportOwner | null {
+  return transport?.owner ?? null;
+}
+
+/* ---------- Click times, so trackers can ignore the app's own clicks in the mic ---------- */
+
+export const clickLog = new ClickLog();
+
+/** Every engine that schedules an audible click reports its AudioContext time here. */
+export function registerClick(when: number): void {
+  clickLog.add(when);
+}
+
+metronome.onClick = registerClick;
+
 let metronomeStartedAt = 0;
 metronome.onState((playing) => {
   if (playing) {
-    metronomeStartedAt = performance.now();
+    claimTransport('metronome', () => metronome.stop());
+    // A resume after an interruption keeps counting the same session.
+    metronomeStartedAt ||= performance.now();
     return;
   }
+  releaseTransport('metronome');
   if (metronomeStartedAt) logPractice((performance.now() - metronomeStartedAt) / 1000, 'metronome');
   metronomeStartedAt = 0;
 });
@@ -29,11 +68,8 @@ metronome.onTempo((bpm) => {
 subscribeSettings((s) => {
   const m = s.metronome;
   const cur = metronome.settings;
-  const keys = [
-    'bpm', 'beatsPerBar', 'beatUnit', 'subdivision', 'sound', 'volume', 'accents',
-    'trainerBars', 'trainerStep', 'trainerMax', 'countInBars', 'poly', 'playBars', 'muteBars', 'randomMute', 'stopAfterBars',
-  ] as const;
-  if (keys.some((k) => m[k] !== cur[k])) metronome.update(m);
+  const keys = Object.keys(m) as (keyof typeof m)[];
+  if (keys.some((k) => m[k] !== (cur as unknown as typeof m)[k])) metronome.update(m);
 });
 
 /** Seconds from scheduling a sound to it leaving the speakers. */
@@ -59,13 +95,14 @@ export function createTracker(extra: Partial<TrackerOptions> = {}): AppTracker {
     gate: (t, frameSeconds, level) => {
       const latency = outputLatency();
       if (selfSounds.inFrame(t, frameSeconds, latency)) return true;
-      if (!getSettings().ignoreClick || !metronome.playing) {
+      if (!getSettings().ignoreClick || !transportOwner()) {
         hearing.reset();
         return false;
       }
+      const clicks = clickLog.times(t - frameSeconds - latency);
       // With headphones the click never reaches the mic, so gating would only throw readings away.
-      if (hearing.observe(t, level, metronome.recentClicks, latency) === 'inaudible') return false;
-      return nearClick(t, metronome.recentClicks, 0.01, 0.08, latency, frameSeconds);
+      if (hearing.observe(t, level, clicks, latency) === 'inaudible') return false;
+      return nearClick(t, clicks, 0.01, 0.08, latency, frameSeconds);
     },
     deviceId: () => getSettings().micDeviceId,
     channel: () => getSettings().micChannel,

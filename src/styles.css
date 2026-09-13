@@ -4147,3 +4147,85 @@ canvas.take-chart {
 .pitch-ring.many-notes .note-label {
   font-size: 9px;
 }
+
+
+/* Metronome: five accent levels, groups, poly row, rhythm grid, stall banner */
+.beat-block.medium .beat-fill {
+  height: 82%;
+  background: color-mix(in srgb, var(--brand) 20%, var(--surface-3));
+}
+.beat-block.soft .beat-fill {
+  height: 42%;
+}
+.beat-blocks.grouped .beat-block.group-start {
+  margin-left: 10px;
+}
+.poly-row {
+  display: flex;
+  justify-content: space-around;
+  gap: 4px;
+  margin-top: 10px;
+}
+.poly-row i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+.poly-row i.on {
+  background: var(--brand-2, var(--brand));
+}
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rhythm-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.grid-row {
+  display: flex;
+  gap: 4px;
+}
+.grid-cell {
+  flex: 1;
+  min-width: 28px;
+  height: 36px;
+  border-radius: 8px;
+  border: 0;
+  font: 700 0.8rem var(--font-display);
+  color: var(--text);
+  background: var(--surface-3);
+}
+.grid-cell.accent {
+  background: var(--brand);
+  color: var(--brand-text);
+}
+.grid-cell.medium {
+  background: color-mix(in srgb, var(--brand) 60%, var(--surface-3));
+}
+.grid-cell.normal {
+  background: color-mix(in srgb, var(--brand) 35%, var(--surface-3));
+}
+.grid-cell.soft {
+  background: color-mix(in srgb, var(--brand) 15%, var(--surface-3));
+}
+.grid-cell.silent {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--line-2);
+}
+.stall-banner {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--brand);
+  color: var(--brand-text);
+  font-weight: 700;
+}

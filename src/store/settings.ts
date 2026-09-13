@@ -5,6 +5,7 @@ import { EDOS, type CapturedNote } from '../core/scales';
 import type { TuningCheckEntry } from '../core/tuningtools';
 import { dayKey } from '../core/practice';
 import type { AccentLevel, ClickTrack } from '../core/rhythm';
+import type { SubLayer } from '../core/metroseq';
 import type { Damping } from '../core/tracking';
 import type { MicChannel } from '../core/mic';
 import type { ReferenceOctave } from '../core/selfsound';
@@ -163,6 +164,25 @@ export interface Settings {
     stopAfterBars: number;
     visual: BeatVisual;
     flashScreen: boolean;
+    /** Beats per polyrhythm cycle (0 = one bar). */
+    polyBeats: number;
+    /** How much louder accents are than normal beats, in dB. */
+    accentDb: number;
+    /** Beat groups, for example [2, 2, 3]; empty = none. */
+    grouping: number[];
+    /** One click per group instead of per beat. */
+    clickGroups: boolean;
+    /** Note value BPM counts, in whole notes; 0 = the beat unit. */
+    pulseNote: number;
+    /** Levels of subdivision clicks per beat and cell. */
+    pattern: (AccentLevel | 'sub')[][];
+    subdivisionPerBeat: number[];
+    figure: string;
+    swing: number;
+    layers: SubLayer[];
+    timeline: string;
+    /** Accent patterns remembered per meter ("7/8"), restored when you return to it. */
+    accentMemory: Record<string, AccentLevel[]>;
   };
   metronomePresets: MetronomePreset[];
   drone: {
@@ -256,6 +276,18 @@ export const DEFAULT_SETTINGS: Settings = {
     stopAfterBars: 0,
     visual: 'blocks',
     flashScreen: false,
+    polyBeats: 0,
+    accentDb: 6,
+    grouping: [],
+    clickGroups: false,
+    pulseNote: 0,
+    pattern: [],
+    subdivisionPerBeat: [],
+    figure: '',
+    swing: 50,
+    layers: [],
+    timeline: '',
+    accentMemory: {},
   },
   metronomePresets: [],
   drone: { octave: 3, timbre: 'organ', volume: 0.6, view: 'wheel', chord: 'root' },

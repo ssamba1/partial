@@ -4,7 +4,7 @@ import './styles.css';
 import { activeNotes, onDronesChange, stopAll } from './audio/droneBank';
 import { noteName, transpositionShort } from './core/notes';
 import { getSettings, subscribeSettings, updateSettings } from './store/settings';
-import { holdButton, iconButton, openSheet } from './ui/components';
+import { holdButton, iconButton, openSheet, toast } from './ui/components';
 import { installGlobalShortcuts, restoreMidi } from './ui/controls';
 import { h } from './ui/dom';
 import { icon, type IconName } from './ui/icons';
@@ -182,9 +182,27 @@ function renderDock() {
 }
 metronome.onState(renderDock);
 metronome.onBeat((e) => {
-  if (e.sub !== 0) return;
+  if (e.sub !== 0 || e.layer) return;
   [...dockBeats.children].forEach((c, i) => c.classList.toggle('on', i === e.beat));
   if (e.beat === 0) renderDock();
+});
+// The system can suspend audio mid-session (a phone call, another app). Say so and offer a resume.
+const stallBanner = h(
+  'button',
+  { class: 'stall-banner', hidden: true, onclick: () => void metronome.resume() },
+  'Audio paused by the system. Tap to resume.',
+);
+metronome.onStall((stalled) => {
+  stallBanner.hidden = !stalled;
+});
+let silentTipShown = false;
+metronome.onState((playing) => {
+  // iOS before audioSession support mutes web audio with the silent switch.
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  if (playing && ios && !('audioSession' in navigator) && !silentTipShown) {
+    silentTipShown = true;
+    toast('No sound? Check the silent switch.');
+  }
 });
 onDronesChange(() => {
   renderDock();
@@ -204,6 +222,7 @@ document.getElementById('app')!.replaceChildren(
   rail,
   h('div', { class: 'app-main' }, topbar, outlet),
   dock,
+  stallBanner,
   tabbar,
 );
 renderTuningChip();

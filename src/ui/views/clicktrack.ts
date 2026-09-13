@@ -7,7 +7,7 @@ import { getSettings, logPractice, updateSettings } from '../../store/settings';
 import { holdButton, iconButton, openSheet, toast } from '../components';
 import { h, select } from '../dom';
 import { icon } from '../icons';
-import { metronome } from '../shared';
+import { claimTransport, registerClick, releaseTransport } from '../shared';
 
 const section = (name: string, bars: number, bpm: number, beatsPerBar = 4, extra: Partial<ClickSection> = {}): ClickSection => ({
   name,
@@ -269,11 +269,11 @@ export function mountClickTrack(root: HTMLElement) {
       return;
     }
     starting = true;
-    metronome.stop();
     const ctx = await ensureRunning();
     if (!starting || disposed) return;
     starting = false;
-    scheduler ??= new LookaheadScheduler(ctx);
+    scheduler ??= new LookaheadScheduler(ctx, { dest: getMaster() });
+    claimTransport('clicktrack', stop);
     const { events, duration } = expandClickTrack(track);
     let i = 0;
     const s = getSettings().metronome;
@@ -283,7 +283,10 @@ export function mountClickTrack(root: HTMLElement) {
     playhead.hidden = false;
     playStartAudio = scheduler.start(
       () => events[i++] ?? null,
-      (e) => playClick(ctx, getMaster(), e.when, e.level, e.countIn ? 'tick' : s.sound, s.volume),
+      (e) => {
+        if (e.level !== 'silent') registerClick(e.when);
+        playClick(ctx, scheduler?.destination ?? getMaster(), e.when, e.level, e.countIn ? 'tick' : s.sound, s.volume, { accentDb: s.accentDb });
+      },
       (e) => {
         if (e.sub !== 0) return;
         const sec = track.sections[e.section];
@@ -311,6 +314,7 @@ export function mountClickTrack(root: HTMLElement) {
   }
 
   function finish() {
+    releaseTransport('clicktrack');
     if (playStartedAt) logPractice((performance.now() - playStartedAt) / 1000, 'metronome');
     playStartedAt = 0;
     cancelAnimationFrame(raf);

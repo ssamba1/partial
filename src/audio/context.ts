@@ -2,6 +2,19 @@ import { micFailure, type MicFailureReason } from '../core/mic';
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
+const stateListeners = new Set<(state: AudioContextState | 'interrupted') => void>();
+
+/**
+ * Limiter settings for the master bus: clicks, poly, subdivisions and drones can
+ * stack past full scale, so peaks are held just under it instead of clipping.
+ */
+export const LIMITER = { threshold: -3, knee: 0, ratio: 20, attack: 0.001, release: 0.1 };
+
+/** Called when the audio context is suspended, interrupted (a phone call) or resumes. */
+export function onContextState(fn: (state: AudioContextState | 'interrupted') => void): () => void {
+  stateListeners.add(fn);
+  return () => stateListeners.delete(fn);
+}
 let micStream: MediaStream | null = null;
 let micUsers = 0;
 let micPending: Promise<MediaStream> | null = null;
@@ -10,7 +23,16 @@ export function getContext(): AudioContext {
   if (!ctx) {
     ctx = new AudioContext({ latencyHint: 'interactive' });
     master = ctx.createGain();
-    master.connect(ctx.destination);
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = LIMITER.threshold;
+    limiter.knee.value = LIMITER.knee;
+    limiter.ratio.value = LIMITER.ratio;
+    limiter.attack.value = LIMITER.attack;
+    limiter.release.value = LIMITER.release;
+    master.connect(limiter);
+    limiter.connect(ctx.destination);
+    const c = ctx;
+    c.addEventListener('statechange', () => stateListeners.forEach((fn) => fn(c.state as AudioContextState | 'interrupted')));
   }
   return ctx;
 }
@@ -23,6 +45,16 @@ export function getMaster(): GainNode {
 /** Must be called from a user gesture on first use (browser autoplay policy). */
 export async function ensureRunning(): Promise<AudioContext> {
   const c = getContext();
+  // Ask for a media playback session where supported (Safari), so the click is not treated as ambient
+  // sound. Whether this overrides the iPhone silent switch is untested here.
+  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+  if (session && session.type !== 'playback') {
+    try {
+      session.type = 'playback';
+    } catch {
+      // Read-only or unsupported value: leave it.
+    }
+  }
   if (c.state !== 'running') await c.resume();
   return c;
 }

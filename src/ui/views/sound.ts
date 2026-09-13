@@ -2,6 +2,7 @@ import { ensureRunning, getMaster } from '../../audio/context';
 import { activeNotes, isOn, noteOff, noteOn, onDronesChange, setTimbreAll, stopAll, toggleNote } from '../../audio/droneBank';
 import { LookaheadScheduler } from '../../audio/scheduler';
 import { DRONE_TIMBRES, playClick, playTone, type DroneTimbre } from '../../audio/voices';
+import type { ClickEvent } from '../../core/rhythm';
 import { buildExercise, PATTERNS, type Direction, type Pattern } from '../../core/exercises';
 import { angleDelta, pointAngle } from '../../core/gestures';
 import { midiToFrequency, mod, noteName, prettyName } from '../../core/notes';
@@ -9,6 +10,7 @@ import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings
 import { capturePointer, holdButton, segmented, svgEl } from '../components';
 import { field, h, select } from '../dom';
 import { icon } from '../icons';
+import { claimTransport, metronome, registerClick, releaseTransport } from '../shared';
 
 const CHORDS: { id: string; label: string; intervals: number[] }[] = [
   { id: 'root', label: 'Single', intervals: [0] },
@@ -324,6 +326,7 @@ function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElemen
   }
 
   function finish() {
+    releaseTransport('exercise');
     playBtn.replaceChildren(icon('play', 20));
     onNote(null);
     // Only stop the root drone if the exercise started it; a drone the user was already playing stays on.
@@ -341,7 +344,7 @@ function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElemen
       starting = false;
       return;
     }
-    scheduler ??= new LookaheadScheduler(ctx);
+    scheduler ??= new LookaheadScheduler(ctx, { dest: getMaster() });
     const root = (octave + 1) * 12 + rootPc;
     const notes = buildExercise(pattern, root, octaves, direction);
     const bpm = getSettings().metronome.bpm;
@@ -360,22 +363,32 @@ function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElemen
     }
     starting = false;
     let i = 0;
-    const lead = 2; // two clicks of count-in so you can come in
+    // When the metronome is already playing at this tempo, come in on its next barline and let it keep the click.
+    const barTime = metronome.settings.bpm === bpm ? metronome.nextBarTime(0.15) : null;
+    const withMetronome = barTime !== null;
+    const lead = withMetronome ? 0 : 2; // two clicks of count-in so you can come in
+    if (!withMetronome) claimTransport('exercise', stop);
     playBtn.replaceChildren(icon('stop', 18));
+    const next = (): ClickEvent | null => {
+      if (i >= notes.length + lead) return null;
+      const idx = i++;
+      return { time: idx * dur, bar: idx - lead, beat: 0, sub: 0, level: idx < lead ? 'accent' : 'normal', bpm, section: 0, countIn: idx < lead };
+    };
     scheduler.start(
-      () => {
-        if (i >= notes.length + lead) return null;
-        const idx = i++;
-        return { time: idx * dur, bar: idx - lead, beat: 0, sub: 0, level: idx < lead ? 'accent' : 'normal', bpm, section: 0, countIn: idx < lead };
-      },
+      next,
       (e) => {
+        const dest = scheduler?.destination ?? getMaster();
         if (e.countIn) {
-          playClick(ctx, getMaster(), e.when, 'accent', 'tick', s.metronome.volume);
+          registerClick(e.when);
+          playClick(ctx, dest, e.when, 'accent', 'tick', s.metronome.volume);
           return;
         }
         const midi = notes[e.bar];
-        playTone(ctx, getMaster(), e.when, midiToFrequency(midi, tuning), dur * 0.92, s.drone.timbre, Math.max(0.35, s.drone.volume));
-        if (clickOn) playClick(ctx, getMaster(), e.when, 'normal', s.metronome.sound, s.metronome.volume * 0.7);
+        playTone(ctx, dest, e.when, midiToFrequency(midi, tuning), dur * 0.92, s.drone.timbre, Math.max(0.35, s.drone.volume));
+        if (clickOn && !withMetronome) {
+          registerClick(e.when);
+          playClick(ctx, dest, e.when, 'normal', s.metronome.sound, s.metronome.volume * 0.7);
+        }
       },
       (e) => {
         if (e.countIn) {
@@ -390,6 +403,7 @@ function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElemen
         finish();
         if (loop) void toggle();
       },
+      withMetronome ? Math.max(0.05, barTime - ctx.currentTime) : undefined,
     );
   }
 

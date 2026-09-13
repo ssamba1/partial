@@ -29,7 +29,7 @@ export const CLICK_SOUNDS: { id: ClickSound; label: string }[] = [
   { id: 'blip', label: 'Blip' },
   { id: 'hihat', label: 'Hi-hat' },
   { id: 'shaker', label: 'Shaker' },
-  { id: 'kick', label: 'Kick' },
+  { id: 'kick', label: 'Kick (best on headphones)' },
   { id: 'snare', label: 'Snare' },
   { id: 'cowbell', label: 'Cowbell' },
   { id: 'triangle', label: 'Triangle' },
@@ -38,7 +38,8 @@ export const CLICK_SOUNDS: { id: ClickSound; label: string }[] = [
 ];
 
 /**
- * Per-sound gain so every click peaks near the same level. Measured by rendering
+ * Per-sound gain so every click peaks near the same level. Used for live synthesis
+ * before a sound is pre-rendered, which then matches sounds by RMS instead. Measured by rendering
  * each sound offline (accent at volume 0.8) and scaling toward a 0.55 peak.
  */
 const LOUDNESS: Record<ClickSound, number> = {
@@ -104,21 +105,36 @@ function envelope(ctx: BaseAudioContext, dest: AudioNode, when: number, peak: nu
   return g;
 }
 
-/** Schedule one click at AudioContext time `when`. */
-export function playClick(
-  ctx: BaseAudioContext,
-  dest: AudioNode,
-  when: number,
-  level: AccentLevel | 'sub',
-  sound: ClickSound,
-  volume = 1,
-): void {
-  if (level === 'silent' || volume <= 0) return;
-  const gainByLevel = { accent: 1, normal: 0.7, sub: 0.4 }[level];
-  const pitchByLevel = { accent: 1.5, normal: 1, sub: 0.8 }[level];
-  const peak = gainByLevel * volume * (LOUDNESS[sound] ?? 1);
+/** Gain of each accent level. `accentDb` is how much louder an accent is than a normal beat. */
+export function levelGain(level: AccentLevel | 'sub', accentDb = DEFAULT_ACCENT_DB): number {
+  const normal = Math.pow(10, -Math.min(12, Math.max(0, accentDb)) / 20);
+  switch (level) {
+    case 'accent':
+      return 1;
+    case 'medium':
+      return Math.sqrt(normal);
+    case 'normal':
+      return normal;
+    case 'soft':
+      return normal * 0.6;
+    case 'sub':
+      return normal * 0.57;
+    default:
+      return 0;
+  }
+}
 
-  const p = pitchByLevel;
+export const DEFAULT_ACCENT_DB = 6;
+
+const PITCH_BY_LEVEL: Record<AccentLevel | 'sub', number> = { accent: 1.5, medium: 1.25, normal: 1, soft: 0.9, sub: 0.8, silent: 1 };
+/** Filter brightness for unpitched sounds, which cannot use pitch to mark the accent. */
+const BRIGHT_BY_LEVEL: Record<AccentLevel | 'sub', number> = { accent: 1.35, medium: 1.15, normal: 1, soft: 0.9, sub: 0.85, silent: 1 };
+
+/** Draw one click with live nodes. Level changes pitch and colour; `peak` carries the gain. */
+function synthClick(ctx: BaseAudioContext, dest: AudioNode, when: number, level: AccentLevel | 'sub', sound: ClickSound, peak: number): void {
+  const p = PITCH_BY_LEVEL[level];
+  const bright = BRIGHT_BY_LEVEL[level];
+  const strong = level === 'accent' || level === 'medium';
   switch (sound) {
     case 'wood':
       noise(ctx, dest, when, 'bandpass', 1800 * p, 12, peak * 4, 0.06);
@@ -129,7 +145,7 @@ export function playClick(
       tone(ctx, dest, when, 5000 * p, 'sine', peak * 0.08, 0.03);
       break;
     case 'rim':
-      noise(ctx, dest, when, 'highpass', 2500, 1, peak * 0.9, 0.03);
+      noise(ctx, dest, when, 'highpass', 2500 * bright, 1, peak * 0.9, strong ? 0.045 : 0.03);
       tone(ctx, dest, when, 1700 * p, 'triangle', peak * 0.5, 0.05, 900 * p);
       break;
     case 'sticks':
@@ -143,18 +159,25 @@ export function playClick(
       tone(ctx, dest, when, 1600 * p, 'sine', peak * 0.7, 0.09, 700 * p);
       break;
     case 'hihat':
-      noise(ctx, dest, when, 'highpass', 7000, 0.7, peak * (level === 'accent' ? 1.1 : 0.7), level === 'accent' ? 0.09 : 0.04);
+      noise(ctx, dest, when, 'highpass', 7000 * Math.min(1.2, bright), 0.7, peak * (strong ? 1.1 : 0.7), level === 'accent' ? 0.09 : strong ? 0.06 : 0.04);
+      // Accents get a bright stick transient on top, so they stand out without pitch.
+      if (strong) noise(ctx, dest, when, 'bandpass', 4500, 3, peak * 0.8, 0.012);
       break;
     case 'shaker':
       noise(ctx, dest, when, 'bandpass', 6000 * p, 1.2, peak * 1.2, 0.06);
+      if (strong) noise(ctx, dest, when, 'bandpass', 3000, 2, peak * 0.9, 0.015);
       break;
     case 'kick':
       tone(ctx, dest, when, 150 * p, 'sine', peak * 1.2, 0.18, 45);
+      // Second harmonic and a beater transient, so phone speakers that cannot play the low sine still hear it.
+      tone(ctx, dest, when, 300 * p, 'sine', peak * 0.45, 0.08, 110);
+      noise(ctx, dest, when, 'bandpass', 3200 * bright, 1.5, peak * 0.9, 0.012);
       tone(ctx, dest, when, 1000, 'triangle', peak * 0.1, 0.01);
       break;
     case 'snare':
-      noise(ctx, dest, when, 'highpass', 1500, 0.8, peak * 1.2, 0.09);
+      noise(ctx, dest, when, 'highpass', 1500 * bright, 0.8, peak * 1.2, strong ? 0.099 : 0.09);
       tone(ctx, dest, when, 220 * p, 'triangle', peak * 0.5, 0.07, 160 * p);
+      if (strong) noise(ctx, dest, when, 'bandpass', 5000, 2, peak * 0.6, 0.015);
       break;
     case 'triangle':
       tone(ctx, dest, when, 3100 * p, 'sine', peak * 0.35, 0.6);
@@ -176,12 +199,12 @@ export function playClick(
       const g = envelope(ctx, dest, when, peak * 0.25, 0.25);
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.value = 800 * pitchByLevel;
+      bp.frequency.value = 800 * p;
       bp.connect(g);
       for (const f of [540, 800]) {
         const osc = ctx.createOscillator();
         osc.type = 'square';
-        osc.frequency.value = f * pitchByLevel;
+        osc.frequency.value = f * p;
         osc.connect(bp);
         osc.start(when);
         osc.stop(when + 0.3);
@@ -192,12 +215,151 @@ export function playClick(
     default: {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
-      osc.frequency.value = 1000 * pitchByLevel;
+      osc.frequency.value = 1000 * p;
       osc.connect(envelope(ctx, dest, when, peak * 0.6, 0.05));
       osc.start(when);
       osc.stop(when + 0.07);
     }
   }
+}
+
+const RENDER_LEVELS: (AccentLevel | 'sub')[] = ['accent', 'medium', 'normal', 'soft', 'sub'];
+const SLOT_SECONDS = 1;
+
+const clickSets = new Map<string, Partial<Record<AccentLevel | 'sub', AudioBuffer>>>();
+const clickRenders = new Map<string, Promise<void>>();
+
+/** Energy-based level of a click: RMS over a 4-beat pattern at 120 BPM (one click per 0.5 s). */
+export function patternRms(samples: Float32Array, sampleRate: number): number {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  return Math.sqrt((sum * 4) / (2 * sampleRate));
+}
+
+export function peakOf(samples: Float32Array): number {
+  let m = 0;
+  for (let i = 0; i < samples.length; i++) m = Math.max(m, Math.abs(samples[i]));
+  return m;
+}
+
+/**
+ * Gain that matches a click's pattern RMS to the reference, capped so its peak stays at or below `peakCap`.
+ * Matching on energy rather than peak keeps long sounds (bell) from sounding much louder than short ones (tick).
+ * This is plain RMS, not K-weighted loudness.
+ */
+export function loudnessGain(rms: number, peak: number, targetRms: number, peakCap = 0.9): number {
+  if (!(rms > 0) || !(peak > 0)) return 1;
+  return Math.min(targetRms / rms, peakCap / peak);
+}
+
+async function renderRaw(sampleRate: number, sound: ClickSound, gain: number): Promise<Float32Array[]> {
+  const length = Math.ceil(sampleRate * SLOT_SECONDS * RENDER_LEVELS.length);
+  const off = new OfflineAudioContext(1, length, sampleRate);
+  RENDER_LEVELS.forEach((level, i) => synthClick(off, off.destination, i * SLOT_SECONDS + 0.001, level, sound, gain));
+  const out = await off.startRendering();
+  const data = out.getChannelData(0);
+  const slot = Math.floor(sampleRate * SLOT_SECONDS);
+  return RENDER_LEVELS.map((_, i) => {
+    const seg = data.subarray(i * slot, (i + 1) * slot);
+    let last = seg.length - 1;
+    while (last > 0 && Math.abs(seg[last]) < 1e-4) last--;
+    return seg.slice(0, last + 1);
+  });
+}
+
+let referenceRms: Promise<number> | null = null;
+let referenceRate = 0;
+
+/**
+ * Pre-render every level of a sound once into AudioBuffers, so each click is one
+ * buffer source and one gain instead of 2 to 5 live nodes. Sounds are matched to
+ * the woodblock by pattern RMS. Safe to call repeatedly.
+ */
+export function prepareClicks(ctx: BaseAudioContext, sounds: ClickSound[]): Promise<void> {
+  if (typeof OfflineAudioContext === 'undefined') return Promise.resolve();
+  const rate = ctx.sampleRate;
+  if (!referenceRms || referenceRate !== rate) {
+    referenceRate = rate;
+    // The woodblock at its old peak-matched level is the reference, so overall loudness stays where it was.
+    referenceRms = renderRaw(rate, 'wood', LOUDNESS.wood).then((segs) => patternRms(segs[0], rate));
+  }
+  const ref = referenceRms;
+  return Promise.all(
+    [...new Set(sounds)].map((sound) => {
+      const key = `${rate}:${sound}`;
+      let job = clickRenders.get(key);
+      if (!job) {
+        job = Promise.all([ref, renderRaw(rate, sound, 1)])
+          .then(([target, segs]) => {
+            const gain = loudnessGain(patternRms(segs[0], rate), peakOf(segs[0]), target);
+            const buffers: Partial<Record<AccentLevel | 'sub', AudioBuffer>> = {};
+            RENDER_LEVELS.forEach((level, i) => {
+              const seg = segs[i];
+              const buf = new AudioBuffer({ length: Math.max(1, seg.length), sampleRate: rate, numberOfChannels: 1 });
+              const d = buf.getChannelData(0);
+              for (let k = 0; k < seg.length; k++) d[k] = seg[k] * gain;
+              buffers[level] = buf;
+            });
+            clickSets.set(key, buffers);
+          })
+          .catch(() => {
+            // Rendering failed: keep using live synthesis.
+            clickRenders.delete(key);
+          });
+        clickRenders.set(key, job);
+      }
+      return job;
+    }),
+  ).then(() => undefined);
+}
+
+export interface ClickOptions {
+  /** Seconds until the next click; long sounds are cut at 80% of it so fast clicks do not smear. */
+  gap?: number;
+  /** How much louder accents are than normal beats, in dB (0 to 12). */
+  accentDb?: number;
+}
+
+/** Schedule one click at AudioContext time `when`. */
+export function playClick(
+  ctx: BaseAudioContext,
+  dest: AudioNode,
+  when: number,
+  level: AccentLevel | 'sub',
+  sound: ClickSound,
+  volume = 1,
+  opts: ClickOptions = {},
+): void {
+  if (level === 'silent' || volume <= 0) return;
+  const gain = levelGain(level, opts.accentDb) * volume;
+  const buffer = clickSets.get(`${ctx.sampleRate}:${sound}`)?.[level];
+  const cut = opts.gap && opts.gap > 0 ? opts.gap * 0.8 : Infinity;
+  if (buffer) {
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, when);
+    if (cut < buffer.duration) {
+      g.gain.setValueAtTime(gain, when + cut);
+      g.gain.linearRampToValueAtTime(0, when + cut + 0.005);
+    }
+    src.connect(g);
+    g.connect(dest);
+    src.start(when);
+    src.stop(when + Math.min(buffer.duration, cut + 0.006));
+    return;
+  }
+  // Not rendered yet (first tap): synthesize live and render in the background.
+  void prepareClicks(ctx, [sound]);
+  let out: AudioNode = dest;
+  if (cut < 0.8) {
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(1, when + cut);
+    g.gain.linearRampToValueAtTime(0, when + cut + 0.005);
+    g.connect(dest);
+    out = g;
+  }
+  synthClick(ctx, out, when, level, sound, gain * (LOUDNESS[sound] ?? 1));
 }
 
 export type DroneTimbre = 'sine' | 'triangle' | 'sawtooth' | 'square' | 'organ' | 'reed' | 'strings' | 'cello' | 'clarinet' | 'flute' | 'voice';

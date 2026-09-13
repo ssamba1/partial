@@ -432,7 +432,7 @@ await check('metronome schedules exact 100 BPM triplets', async () => {
   await open('metronome');
   const gaps = await run(`
     const times = []; const orig = AudioBufferSourceNode.prototype.start; const origO = OscillatorNode.prototype.start;
-    AudioBufferSourceNode.prototype.start = function (w, ...a) { times.push(w); return orig.call(this, w, ...a); };
+    AudioBufferSourceNode.prototype.start = function (w, ...a) { if (this.context instanceof AudioContext) times.push(w); return orig.call(this, w, ...a); };
     [...document.querySelectorAll('.seg-btn')].find((b) => b.textContent === '3').click();
     await new Promise((r) => setTimeout(r, 200));
     document.querySelector('.play-btn').click(); await new Promise((r) => setTimeout(r, 1600)); document.querySelector('.play-btn').click();
@@ -453,6 +453,28 @@ await check('metronome: a quick double tap leaves it stopped', async () => {
     return document.querySelector('.metronome').classList.contains('playing');`);
   assert(out === false, 'metronome still playing after start+stop taps');
   return 'stopped';
+});
+
+await check('metronome: 7/8 beat groups, five accent levels and practice tools open', async () => {
+  await open('metronome');
+  const out = await run(`
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const closeSheet = async () => { document.querySelector('.sheet-layer [aria-label="Close"]').click(); await wait(350); };
+    document.querySelector('.meter-btn').click(); await wait(300);
+    [...document.querySelectorAll('.meter-tile')].find((b) => b.getAttribute('aria-label') === '7/8').click(); await wait(350);
+    document.querySelector('.meter-btn').click(); await wait(300);
+    [...document.querySelectorAll('.chips-row .chip')].find((b) => b.textContent === '2+2+3').click(); await wait(200);
+    await closeSheet();
+    const levels = [...document.querySelectorAll('.beat-block')].map((b) => b.classList[1]).join(',');
+    const gaps = document.querySelectorAll('.beat-block.group-start').length;
+    document.querySelector('[aria-label="Metronome options"]').click(); await wait(300);
+    const grid = [...document.querySelectorAll('.sheet-layer button')].some((b) => b.textContent === 'Edit rhythm grid');
+    await closeSheet();
+    document.querySelector('.meter-btn').click(); await wait(300);
+    [...document.querySelectorAll('.meter-tile')].find((b) => b.getAttribute('aria-label') === '4/4').click(); await wait(350);
+    return levels + '|' + gaps + '|' + grid;`);
+  assert(out === 'accent,normal,medium,normal,medium,normal,normal|2|true', `got ${out}`);
+  return out;
 });
 
 await check('speed trainer tempo survives other settings writes', async () => {
