@@ -2,53 +2,82 @@ import { ensureRunning, getMaster } from '../../audio/context';
 import { LookaheadScheduler } from '../../audio/scheduler';
 import { playClick } from '../../audio/voices';
 import { formatDuration, uid } from '../../core/format';
-import { clampBpm, defaultAccents, expandClickTrack, type ClickSection, type ClickTrack } from '../../core/rhythm';
+import { clampBpm, defaultAccents, expandClickTrack, sectionSpans, type ClickSection, type ClickTrack } from '../../core/rhythm';
 import { getSettings, logPractice, updateSettings } from '../../store/settings';
-import { h, numberInput, select } from '../dom';
+import { holdButton, iconButton, openSheet, toast } from '../components';
+import { h, select } from '../dom';
+import { icon } from '../icons';
 import { metronome } from '../shared';
 
-function newSection(): ClickSection {
-  return { name: '', bars: 8, bpm: 100, beatsPerBar: 4, beatUnit: 4, subdivision: 1, accents: defaultAccents(4) };
-}
+const section = (name: string, bars: number, bpm: number, beatsPerBar = 4, extra: Partial<ClickSection> = {}): ClickSection => ({
+  name,
+  bars,
+  bpm,
+  beatsPerBar,
+  beatUnit: 4,
+  subdivision: 1,
+  accents: defaultAccents(beatsPerBar),
+  ...extra,
+});
 
-function newTrack(): ClickTrack {
-  return { id: uid(), name: 'New click track', countInBars: 1, sections: [newSection()] };
-}
+const TEMPLATES: { name: string; build: () => ClickTrack }[] = [
+  { name: 'Blank', build: () => ({ id: uid(), name: 'New click track', countInBars: 1, sections: [section('', 8, 100)] }) },
+  {
+    name: 'Accelerando 60 to 120',
+    build: () => ({ id: uid(), name: 'Accelerando', countInBars: 1, sections: [section('Build', 16, 60, 4, { endBpm: 120 }), section('Hold', 8, 120)] }),
+  },
+  {
+    name: 'Song form',
+    build: () => ({
+      id: uid(),
+      name: 'Song form',
+      countInBars: 1,
+      sections: [section('Intro', 4, 96), section('Verse', 16, 96), section('Chorus', 8, 100), section('Bridge', 8, 90, 3), section('Outro', 4, 96, 4, { endBpm: 80 })],
+    }),
+  },
+  {
+    name: 'Tempo ladder',
+    build: () => ({ id: uid(), name: 'Tempo ladder', countInBars: 1, sections: [70, 80, 90, 100, 110].map((b) => section(`${b} BPM`, 4, b)) }),
+  },
+];
 
 function saveTrack(track: ClickTrack) {
   updateSettings((s) => {
-    const others = s.clickTracks.filter((t) => t.id !== track.id);
-    return { clickTracks: [...others, structuredClone(track)] };
+    const idx = s.clickTracks.findIndex((t) => t.id === track.id);
+    const list = [...s.clickTracks];
+    if (idx >= 0) list[idx] = structuredClone(track);
+    else list.push(structuredClone(track));
+    return { clickTracks: list };
   });
 }
 
 export function mountClickTrack(root: HTMLElement) {
-  let track: ClickTrack = structuredClone(getSettings().clickTracks[0] ?? newTrack());
+  let track: ClickTrack = structuredClone(getSettings().clickTracks[0] ?? TEMPLATES[0].build());
   let scheduler: LookaheadScheduler | null = null;
   let playStartedAt = 0;
+  let playStartAudio = 0;
+  let loop = false;
+  let raf = 0;
 
-  const library = h('div', { class: 'row wrap' });
-  const editor = h('div', { class: 'sections' });
+  const library = h('div', { class: 'track-chips' });
   const nameInput = h('input', {
     type: 'text',
     class: 'track-name',
     'aria-label': 'Click track name',
-    oninput: (e: Event) => {
-      track.name = (e.target as HTMLInputElement).value;
-    },
+    oninput: (e: Event) => (track.name = (e.target as HTMLInputElement).value),
     onchange: () => persist(),
   });
-  const countInInput = numberInput(
-    track.countInBars,
-    (n) => {
-      track.countInBars = Math.max(0, Math.round(n));
-      persist();
-    },
-    { min: 0, max: 8 },
-  );
-  const summary = h('div', { class: 'muted small' });
-  const nowPlaying = h('div', { class: 'now-playing', 'aria-live': 'polite' });
-  const playBtn = h('button', { class: 'primary big', onclick: () => void togglePlay() }, 'Play');
+  const countIn = select([0, 1, 2].map((n) => ({ value: n, label: n ? `${n} bar count-in` : 'No count-in' })), track.countInBars, (v) => {
+    track.countInBars = Number(v);
+    persist();
+  }, { class: 'compact', 'aria-label': 'Count-in' });
+  const summary = h('div', { class: 'track-summary' });
+  const timeline = h('div', { class: 'timeline', role: 'img', 'aria-label': 'Click track timeline' });
+  const playhead = h('div', { class: 'playhead', hidden: true });
+  const editor = h('div', { class: 'section-list' });
+  const nowPlaying = h('div', { class: 'now-playing', 'aria-live': 'polite' }, 'Ready');
+  const playBtn = h('button', { class: 'transport-play', 'aria-label': 'Play click track', onclick: () => void togglePlay() }, icon('play', 22));
+  const loopBtn = h('button', { class: 'tool-btn', 'aria-pressed': 'false', title: 'Loop', onclick: () => { loop = !loop; loopBtn.setAttribute('aria-pressed', String(loop)); } }, icon('undo', 16), 'Loop');
 
   function persist() {
     saveTrack(track);
@@ -57,109 +86,148 @@ export function mountClickTrack(root: HTMLElement) {
   }
 
   function renderSummary() {
-    const { events, duration } = expandClickTrack(track);
+    const { spans, countIn: ci, duration } = sectionSpans(track);
     const bars = track.sections.reduce((n, s) => n + s.bars, 0);
-    summary.textContent = `${track.sections.length} section(s), ${bars} bars, ${formatDuration(duration)} including count-in, ${events.filter((e) => e.sub === 0).length} beats`;
+    summary.replaceChildren(
+      h('span', null, h('b', null, String(track.sections.length)), ' sections'),
+      h('span', null, h('b', null, String(bars)), ' bars'),
+      h('span', null, h('b', null, formatDuration(duration)), ' total'),
+    );
+    const total = duration || 1;
+    timeline.replaceChildren(
+      ...(ci > 0 ? [h('div', { class: 'tl-seg count', style: `flex:${ci / total}`, title: 'Count-in' }, h('span', null, 'In'))] : []),
+      ...spans.map((sp) => {
+        const s = track.sections[sp.section];
+        const ramp = s.endBpm !== undefined && s.endBpm !== s.bpm;
+        return h(
+          'button',
+          {
+            class: `tl-seg${ramp ? ' ramp' : ''}`,
+            style: `flex:${(sp.end - sp.start) / total};--hue:${(sp.section * 47) % 360}`,
+            title: `${s.name || `Section ${sp.section + 1}`}: ${s.bars} bars, ${ramp ? `${s.bpm} to ${s.endBpm}` : s.bpm} BPM, ${s.beatsPerBar}/${s.beatUnit}`,
+            onclick: () => editor.children[sp.section]?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+          },
+          h('b', null, s.name || `${sp.section + 1}`),
+          h('span', null, ramp ? `${s.bpm}→${s.endBpm}` : String(s.bpm)),
+        );
+      }),
+      playhead,
+    );
   }
 
   function renderLibrary() {
     const tracks = getSettings().clickTracks;
     library.replaceChildren(
       ...tracks.map((t) =>
-        h(
-          'button',
-          {
-            class: `chip${t.id === track.id ? ' on' : ''}`,
-            onclick: () => {
-              stop();
-              track = structuredClone(t);
-              renderAll();
-            },
-          },
-          t.name || 'Untitled',
-        ),
+        h('button', { class: `chip${t.id === track.id ? ' on' : ''}`, onclick: () => { stop(); track = structuredClone(t); renderAll(); } }, icon('clicktrack', 14), t.name || 'Untitled'),
       ),
-      h(
-        'button',
-        {
-          class: 'chip add',
-          onclick: () => {
-            stop();
-            track = newTrack();
-            persist();
-            renderAll();
-          },
-        },
-        '+ New',
-      ),
+      h('button', { class: 'chip add', onclick: openTemplates }, icon('plus', 14), 'New'),
     );
   }
 
-  function sectionRow(section: ClickSection, index: number): HTMLElement {
-    const update = (patch: Partial<ClickSection>) => {
-      Object.assign(section, patch);
-      if (patch.beatsPerBar !== undefined) section.accents = defaultAccents(section.beatsPerBar);
-      persist();
+  function openTemplates() {
+    let close = () => {};
+    const list = h(
+      'div',
+      { class: 'template-list' },
+      TEMPLATES.map((tpl) =>
+        h(
+          'button',
+          {
+            class: 'template',
+            onclick: () => {
+              stop();
+              track = tpl.build();
+              persist();
+              renderAll();
+              close();
+            },
+          },
+          h('b', null, tpl.name),
+          h('span', null, (() => {
+            const t = tpl.build();
+            return `${t.sections.length} section${t.sections.length > 1 ? 's' : ''} · ${formatDuration(expandClickTrack(t).duration)}`;
+          })()),
+        ),
+      ),
+    );
+    close = openSheet('New click track', list);
+  }
+
+  const stepper = (label: string, value: number, min: number, max: number, set: (n: number) => void) => {
+    const out = h('output', null, String(value));
+    const change = (d: number) => {
+      const next = Math.min(max, Math.max(min, Number(out.textContent) + d));
+      out.textContent = String(next);
+      set(next);
     };
-    const ramp = section.endBpm !== undefined;
     return h(
       'div',
-      { class: 'section-card' },
+      { class: 'mini-stepper' },
+      h('span', null, label),
+      h('div', null, holdButton(icon('minus', 14), `${label} down`, () => change(-1), 'step'), out, holdButton(icon('plus', 14), `${label} up`, () => change(1), 'step')),
+    );
+  };
+
+  function sectionCard(s: ClickSection, index: number): HTMLElement {
+    const update = (patch: Partial<ClickSection>, rerender = false) => {
+      Object.assign(s, patch);
+      if (patch.beatsPerBar !== undefined) s.accents = defaultAccents(s.beatsPerBar);
+      persist();
+      if (rerender) renderEditor();
+    };
+    const ramp = s.endBpm !== undefined;
+    return h(
+      'div',
+      { class: 'section-card v2', style: `--hue:${(index * 47) % 360}` },
       h(
         'div',
-        { class: 'row between' },
-        h('input', {
-          type: 'text',
-          placeholder: `Section ${index + 1}`,
-          value: section.name ?? '',
-          'aria-label': 'Section name',
-          onchange: (e: Event) => update({ name: (e.target as HTMLInputElement).value }),
-        }),
+        { class: 'section-top' },
+        h('span', { class: 'section-index' }, String(index + 1)),
+        h('input', { type: 'text', class: 'section-name', placeholder: `Section ${index + 1}`, value: s.name ?? '', 'aria-label': 'Section name', onchange: (e: Event) => update({ name: (e.target as HTMLInputElement).value }) }),
         h(
           'div',
           { class: 'row tight' },
-          h('button', { class: 'icon', title: 'Move up', 'aria-label': 'Move section up', disabled: index === 0, onclick: () => move(index, -1) }, '↑'),
-          h('button', { class: 'icon', title: 'Move down', 'aria-label': 'Move section down', disabled: index === track.sections.length - 1, onclick: () => move(index, 1) }, '↓'),
-          h('button', { class: 'icon', title: 'Duplicate', 'aria-label': 'Duplicate section', onclick: () => duplicate(index) }, '⧉'),
-          h('button', { class: 'icon danger', title: 'Remove', 'aria-label': 'Remove section', disabled: track.sections.length === 1, onclick: () => remove(index) }, '✕'),
+          iconButton('chevronLeft', 'Move earlier', () => move(index, -1), 'tool-btn plain rot'),
+          iconButton('chevronRight', 'Move later', () => move(index, 1), 'tool-btn plain rot'),
+          iconButton('pages', 'Duplicate', () => duplicate(index), 'tool-btn plain'),
+          iconButton('trash', 'Remove section', () => remove(index), 'tool-btn plain danger'),
         ),
       ),
       h(
         'div',
-        { class: 'section-fields' },
-        h('label', null, 'Bars', numberInput(section.bars, (n) => update({ bars: Math.max(1, Math.round(n)) }), { min: 1, max: 999 })),
-        h('label', null, 'BPM', numberInput(section.bpm, (n) => update({ bpm: clampBpm(n) }), { min: 20, max: 400 })),
+        { class: 'section-grid' },
+        stepper('Bars', s.bars, 1, 999, (n) => update({ bars: n })),
+        stepper('BPM', s.bpm, 20, 400, (n) => update({ bpm: clampBpm(n) })),
+        stepper('Beats', s.beatsPerBar, 1, 16, (n) => update({ beatsPerBar: n })),
         h(
-          'label',
-          null,
-          h('span', null, h('input', { type: 'checkbox', checked: ramp, onchange: (e: Event) => update({ endBpm: (e.target as HTMLInputElement).checked ? section.bpm : undefined }) }), ' Ramp to'),
-          numberInput(section.endBpm ?? section.bpm, (n) => update({ endBpm: clampBpm(n) }), { min: 20, max: 400, class: ramp ? '' : 'disabled' }),
+          'div',
+          { class: 'mini-stepper' },
+          h('span', null, 'Beat unit'),
+          select([2, 4, 8, 16].map((v) => ({ value: v, label: `/${v}` })), s.beatUnit, (v) => update({ beatUnit: Number(v) }), { class: 'compact' }),
+        ),
+        h(
+          'div',
+          { class: 'mini-stepper' },
+          h('span', null, 'Subdivide'),
+          select([1, 2, 3, 4, 6].map((v) => ({ value: v, label: v === 1 ? 'None' : `×${v}` })), s.subdivision, (v) => update({ subdivision: Number(v) }), { class: 'compact' }),
         ),
         h(
           'label',
-          null,
-          'Meter',
-          h(
-            'span',
-            { class: 'row tight' },
-            numberInput(section.beatsPerBar, (n) => update({ beatsPerBar: Math.min(16, Math.max(1, Math.round(n))) }), { min: 1, max: 16 }),
-            '/',
-            select([2, 4, 8, 16].map((v) => ({ value: v, label: String(v) })), section.beatUnit, (v) => update({ beatUnit: Number(v) })),
-          ),
+          { class: 'mini-stepper ramp-toggle' },
+          h('span', null, 'Tempo ramp'),
+          h('input', { type: 'checkbox', role: 'switch', checked: ramp, onchange: (e: Event) => update({ endBpm: (e.target as HTMLInputElement).checked ? Math.min(400, s.bpm + 20) : undefined }, true) }),
         ),
-        h(
-          'label',
-          null,
-          'Subdivision',
-          select([1, 2, 3, 4, 6].map((v) => ({ value: v, label: String(v) })), section.subdivision, (v) => update({ subdivision: Number(v) })),
-        ),
+        ramp ? stepper('Ends at', s.endBpm!, 20, 400, (n) => update({ endBpm: clampBpm(n) })) : null,
       ),
     );
   }
 
   function move(i: number, d: number) {
+    const j = i + d;
+    if (j < 0 || j >= track.sections.length) return;
     const [s] = track.sections.splice(i, 1);
-    track.sections.splice(i + d, 0, s);
+    track.sections.splice(j, 0, s);
     persist();
     renderEditor();
   }
@@ -169,22 +237,23 @@ export function mountClickTrack(root: HTMLElement) {
     renderEditor();
   }
   function remove(i: number) {
+    if (track.sections.length === 1) return toast('A click track needs at least one section');
     track.sections.splice(i, 1);
     persist();
     renderEditor();
   }
 
   function renderEditor() {
-    editor.replaceChildren(...track.sections.map(sectionRow));
+    editor.replaceChildren(...track.sections.map(sectionCard));
+    renderSummary();
   }
 
   function renderAll() {
     nameInput.value = track.name;
-    countInInput.value = String(track.countInBars);
+    countIn.value = String(track.countInBars);
     renderLibrary();
     renderEditor();
-    renderSummary();
-    nowPlaying.textContent = '';
+    nowPlaying.textContent = 'Ready';
   }
 
   async function togglePlay() {
@@ -195,33 +264,50 @@ export function mountClickTrack(root: HTMLElement) {
     metronome.stop();
     const ctx = await ensureRunning();
     scheduler ??= new LookaheadScheduler(ctx);
-    const { events } = expandClickTrack(track);
+    const { events, duration } = expandClickTrack(track);
     let i = 0;
-    const sound = getSettings().metronome.sound;
-    const volume = getSettings().metronome.volume;
+    const s = getSettings().metronome;
     playStartedAt = performance.now();
-    playBtn.textContent = 'Stop';
-    scheduler.start(
+    playBtn.replaceChildren(icon('stop', 20));
+    view.classList.add('playing');
+    playhead.hidden = false;
+    playStartAudio = scheduler.start(
       () => events[i++] ?? null,
-      (e) => playClick(ctx, getMaster(), e.when, e.level, sound, volume),
+      (e) => playClick(ctx, getMaster(), e.when, e.level, e.countIn ? 'tick' : s.sound, s.volume),
       (e) => {
         if (e.sub !== 0) return;
-        const section = track.sections[e.section];
-        nowPlaying.textContent = e.countIn
-          ? `Count-in ${e.beat + 1}`
-          : `${section?.name || `Section ${e.section + 1}`} · bar ${e.bar + 1} · beat ${e.beat + 1} · ${Math.round(e.bpm)} BPM`;
+        const sec = track.sections[e.section];
+        nowPlaying.replaceChildren(
+          e.countIn
+            ? h('b', null, `Count-in ${e.beat + 1}`)
+            : h('span', null, h('b', null, sec?.name || `Section ${e.section + 1}`), ` · bar ${e.bar + 1} · beat ${e.beat + 1}`),
+          h('span', { class: 'np-bpm' }, `${Math.round(e.bpm)} BPM`),
+        );
+        editor.querySelectorAll('.section-card').forEach((c, idx) => c.classList.toggle('current', idx === e.section));
       },
       () => {
         finish();
-        nowPlaying.textContent = 'Finished';
+        if (loop) void togglePlay();
+        else nowPlaying.textContent = 'Finished';
       },
     );
+    const tick = () => {
+      if (!scheduler?.isRunning) return;
+      const t = Math.max(0, ctx.currentTime - playStartAudio);
+      playhead.style.left = `${Math.min(100, (t / duration) * 100)}%`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
   }
 
   function finish() {
     if (playStartedAt) logPractice((performance.now() - playStartedAt) / 1000, 'metronome');
     playStartedAt = 0;
-    playBtn.textContent = 'Play';
+    cancelAnimationFrame(raf);
+    playBtn.replaceChildren(icon('play', 22));
+    view.classList.remove('playing');
+    playhead.hidden = true;
+    editor.querySelectorAll('.section-card.current').forEach((c) => c.classList.remove('current'));
   }
 
   function stop() {
@@ -231,39 +317,55 @@ export function mountClickTrack(root: HTMLElement) {
     nowPlaying.textContent = 'Stopped';
   }
 
-  root.append(
+  const view = h(
+    'section',
+    { class: 'view clicktrack' },
+    library,
     h(
-      'section',
-      { class: 'view clicktrack' },
-      h('p', { class: 'muted' }, 'Build a click track from sections with their own tempo, meter and optional tempo ramp. Saved on this device.'),
-      library,
-      h('div', { class: 'row between wrap' }, nameInput, h('label', { class: 'row tight' }, 'Count-in bars', countInInput)),
+      'div',
+      { class: 'card track-card' },
+      h('div', { class: 'track-head' }, nameInput, countIn),
       summary,
-      editor,
-      h(
-        'div',
-        { class: 'row wrap' },
-        h('button', { onclick: () => { track.sections.push(newSection()); persist(); renderEditor(); } }, '+ Add section'),
-        h(
-          'button',
-          {
-            class: 'danger',
-            onclick: () => {
-              if (!confirm(`Delete "${track.name}"?`)) return;
-              stop();
-              updateSettings((s) => ({ clickTracks: s.clickTracks.filter((t) => t.id !== track.id) }));
-              track = structuredClone(getSettings().clickTracks[0] ?? newTrack());
-              renderAll();
-            },
-          },
-          'Delete track',
-        ),
-      ),
-      h('div', { class: 'sticky-play' }, nowPlaying, playBtn),
+      h('div', { class: 'timeline-wrap' }, timeline),
     ),
+    editor,
+    h(
+      'div',
+      { class: 'row wrap center' },
+      h('button', { class: 'pill-btn', onclick: () => { track.sections.push(structuredClone(track.sections[track.sections.length - 1]) ?? section('', 8, 100)); persist(); renderEditor(); } }, icon('plus', 16), 'Add section'),
+      h(
+        'button',
+        {
+          class: 'pill-btn danger',
+          onclick: () => {
+            if (!confirm(`Delete "${track.name}"?`)) return;
+            stop();
+            updateSettings((s) => ({ clickTracks: s.clickTracks.filter((t) => t.id !== track.id) }));
+            track = structuredClone(getSettings().clickTracks[0] ?? TEMPLATES[0].build());
+            renderAll();
+          },
+        },
+        icon('trash', 16),
+        'Delete track',
+      ),
+    ),
+    h('div', { class: 'sticky-play' }, playBtn, nowPlaying, loopBtn),
   );
+  root.append(view);
   if (!getSettings().clickTracks.some((t) => t.id === track.id)) saveTrack(track);
   renderAll();
 
-  return () => stop();
+  const onKey = (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLButtonElement) return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      void togglePlay();
+    }
+  };
+  window.addEventListener('keydown', onKey);
+
+  return () => {
+    window.removeEventListener('keydown', onKey);
+    stop();
+  };
 }

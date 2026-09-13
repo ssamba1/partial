@@ -130,6 +130,28 @@ export function expandClickTrack(track: ClickTrack): { events: ClickEvent[]; dur
   return { events, duration: t };
 }
 
+export interface SectionSpan {
+  section: number;
+  start: number;
+  end: number;
+}
+
+/** Start and end time of each section (excluding count-in), for drawing a timeline. */
+export function sectionSpans(track: ClickTrack): { spans: SectionSpan[]; countIn: number; duration: number } {
+  const { events, duration } = expandClickTrack(track);
+  const firstIndex = new Map<number, number>();
+  events.forEach((e) => {
+    if (!firstIndex.has(e.section)) firstIndex.set(e.section, e.time);
+  });
+  const countIn = firstIndex.get(0) ?? (track.sections.length ? 0 : duration);
+  const spans = track.sections.map((_, i) => ({
+    section: i,
+    start: firstIndex.get(i) ?? duration,
+    end: firstIndex.get(i + 1) ?? duration,
+  }));
+  return { spans, countIn, duration };
+}
+
 /** Gap trainer: play `playBars`, then silence `muteBars`, repeating. Bar indices start at 0. */
 export function isBarMuted(bar: number, playBars: number, muteBars: number): boolean {
   if (muteBars <= 0 || playBars <= 0 || bar < 0) return false;

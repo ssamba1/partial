@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { barEvents, expandClickTrack, tapTempo, type ClickTrack } from '../src/core/rhythm';
+import { barEvents, expandClickTrack, sectionSpans, tapTempo, type ClickTrack } from '../src/core/rhythm';
 
 describe('barEvents', () => {
   it('4/4 at 120 with eighths', () => {
@@ -61,6 +61,27 @@ describe('expandClickTrack', () => {
     expect(events[7].bpm).toBe(120);
     const gaps = events.slice(1).map((e, i) => e.time - events[i].time);
     for (let i = 1; i < gaps.length; i++) expect(gaps[i]).toBeLessThan(gaps[i - 1]);
+  });
+});
+
+describe('sectionSpans', () => {
+  it('gives section boundaries after the count-in', () => {
+    const track: ClickTrack = {
+      id: 't',
+      name: 't',
+      countInBars: 1,
+      sections: [
+        { bars: 1, bpm: 120, beatsPerBar: 4, beatUnit: 4, subdivision: 1 },
+        { bars: 2, bpm: 60, beatsPerBar: 2, beatUnit: 4, subdivision: 2 },
+      ],
+    };
+    const { spans, countIn, duration } = sectionSpans(track);
+    expect(countIn).toBe(2);
+    expect(spans).toEqual([
+      { section: 0, start: 2, end: 4 },
+      { section: 1, start: 4, end: 8 },
+    ]);
+    expect(duration).toBe(8);
   });
 });
 
