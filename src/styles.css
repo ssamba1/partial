@@ -2988,6 +2988,66 @@ canvas.page {
   font-weight: 650;
 }
 
+.interval-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: clamp(240px, 46dvh, 420px);
+  padding: 4px;
+}
+.interval-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.6fr 1fr 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.interval-row.latest {
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-2));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 40%, transparent);
+}
+.interval-notes {
+  font: 700 1.1rem var(--font-display);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.interval-notes span {
+  color: var(--muted);
+  font-weight: 500;
+}
+.interval-name {
+  display: flex;
+  flex-direction: column;
+}
+.interval-name span,
+.interval-dev span {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.interval-dev {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+.interval-dev b.good {
+  color: var(--good);
+}
+.interval-dev b.sharp {
+  color: var(--sharp);
+}
+.interval-dev b.flat {
+  color: var(--flat);
+}
+@media (max-width: 560px) {
+  .interval-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 .sound-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));

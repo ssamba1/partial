@@ -1,17 +1,19 @@
 import { MicError } from '../../audio/context';
 import { formatCents } from '../../core/format';
-import { noteName, prettyName } from '../../core/notes';
+import { segmentNotes, type HeldNote } from '../../core/intonation';
+import { readInterval } from '../../core/intervals';
+import { midiToFrequency, noteName, prettyName } from '../../core/notes';
 import { harmonicLevels, magnitudeSpectrum } from '../../core/spectrum';
 import { clefFor, staffNote, type Clef } from '../../core/staff';
-import { getSettings } from '../../store/settings';
+import { getSettings, tuningOf } from '../../store/settings';
 import { segmented } from '../components';
 import { cssVar, errorBox, fitCanvas, h } from '../dom';
 import { icon } from '../icons';
 import { ActivityTimer, createTracker } from '../shared';
 
 const WINDOW = 12;
-type Tab = 'pitch' | 'staff' | 'spectrum' | 'harmonics' | 'wave';
-const TABS: Tab[] = ['pitch', 'staff', 'spectrum', 'harmonics', 'wave'];
+type Tab = 'pitch' | 'staff' | 'intervals' | 'spectrum' | 'harmonics' | 'wave';
+const TABS: Tab[] = ['pitch', 'staff', 'intervals', 'spectrum', 'harmonics', 'wave'];
 
 interface Point {
   t: number;
@@ -50,6 +52,7 @@ export function mountAnalysis(root: HTMLElement) {
     [
       { value: 'pitch', label: 'Pitch' },
       { value: 'staff', label: 'Staff' },
+      { value: 'intervals', label: 'Intervals' },
       { value: 'spectrum', label: 'Spectrum' },
       { value: 'harmonics', label: 'Harmonics' },
       { value: 'wave', label: 'Wave' },
@@ -63,6 +66,7 @@ export function mountAnalysis(root: HTMLElement) {
   const CAPTIONS: Record<Tab, string> = {
     pitch: 'Every note you play over the last 12 seconds. The shaded band is your in-tune range around each note.',
     staff: 'Your playing written on a staff, coloured by intonation. Green is in tune, orange sharp, blue flat.',
+    intervals: 'Each step between the notes you hold, compared with equal temperament and with the pure (just) interval players tune by ear.',
     spectrum: 'Energy across frequencies. Dashed lines mark the harmonics of the note you are playing.',
     harmonics: 'Strength of each harmonic relative to the fundamental. This is the colour of your tone.',
     wave: 'The raw waveform, locked to the start of each cycle so a steady tone stands still.',
@@ -122,7 +126,43 @@ export function mountAnalysis(root: HTMLElement) {
     draw();
   });
 
+  const intervalsEl = h('div', { class: 'interval-list', hidden: true });
+  let intervalsKey = '';
+  function renderIntervals() {
+    const notes = segmentNotes(points, 0.3);
+    const key = notes.map((n) => `${n.midi}:${n.start.toFixed(2)}`).join('|');
+    if (key === intervalsKey) return;
+    intervalsKey = key;
+    const s = getSettings();
+    const tuning = tuningOf(s);
+    const freq = (n: HeldNote) => midiToFrequency(n.midi, tuning) * Math.pow(2, n.meanCents / 1200);
+    const pairs = notes.slice(-7).map((n, i, arr) => (i ? [arr[i - 1], n] : null)).filter((p): p is [HeldNote, HeldNote] => p !== null);
+    if (!pairs.length) {
+      intervalsEl.replaceChildren(h('div', { class: 'empty' }, icon('analysis', 26), h('b', null, 'Hold two notes in a row'), h('span', null, 'Play one note for a moment, then another. The interval between them appears here.')));
+      return;
+    }
+    const dev = (c: number) => h('b', { class: Math.abs(c) <= s.tolerance ? 'good' : c > 0 ? 'sharp' : 'flat' }, formatCents(c));
+    intervalsEl.replaceChildren(
+      ...pairs.reverse().map(([a, b], idx) => {
+        const r = readInterval(freq(a), freq(b));
+        const arrow = r.direction > 0 ? '↑' : r.direction < 0 ? '↓' : '';
+        return h(
+          'div',
+          { class: `interval-row${idx === 0 ? ' latest' : ''}` },
+          h('div', { class: 'interval-notes' }, prettyName(noteName(a.midi, s.flats)), h('span', null, '→'), prettyName(noteName(b.midi, s.flats))),
+          h('div', { class: 'interval-name' }, h('b', null, `${r.def.name}${r.octaves ? ` + ${r.octaves} oct` : ''} ${arrow}`), h('span', null, `${r.cents.toFixed(0)}¢ played`)),
+          h('div', { class: 'interval-dev' }, h('span', null, 'vs equal'), dev(r.vsEqual)),
+          h('div', { class: 'interval-dev' }, h('span', null, `vs just ${r.def.just[0]}:${r.def.just[1]}`), dev(r.vsJust)),
+        );
+      }),
+    );
+  }
+
   function draw() {
+    const showList = tab === 'intervals';
+    canvas.hidden = showList;
+    intervalsEl.hidden = !showList;
+    if (showList) return renderIntervals();
     const ctx = fitCanvas(canvas);
     const w = canvas.clientWidth;
     const hh = canvas.clientHeight;
@@ -419,7 +459,7 @@ export function mountAnalysis(root: HTMLElement) {
       { class: 'view analysis' },
       h('div', { class: 'toolbar scroll-x' }, tabSeg),
       stats,
-      h('div', { class: 'chart-card' }, canvas),
+      h('div', { class: 'chart-card' }, canvas, intervalsEl),
       caption,
       errorSlot,
       h('div', { class: 'action-row' }, freezeBtn, startBtn),
