@@ -1,4 +1,5 @@
-import { CLICK_SOUNDS } from '../../audio/voices';
+import { ensureRunning, getMaster } from '../../audio/context';
+import { CLICK_SOUNDS, playClick } from '../../audio/voices';
 import { uid } from '../../core/format';
 import { clampBpm, defaultAccents, MAX_BPM, MIN_BPM, tapTempo, TEMPO_MARKINGS, tempoMarking, type AccentLevel } from '../../core/rhythm';
 import { getSettings, subscribeSettings, updateSettings, type BeatVisual, type Settings } from '../../store/settings';
@@ -73,6 +74,35 @@ function openMeterSheet() {
   close = openSheet('Time signature', h('div', { class: 'stack' }, grid, field('Custom', custom)));
 }
 
+function soundGrid(current: string): HTMLElement {
+  const grid = h('div', { class: 'sound-grid', role: 'radiogroup', 'aria-label': 'Click sound' });
+  const draw = (selected: string) =>
+    grid.replaceChildren(
+      ...CLICK_SOUNDS.map((c) =>
+        h(
+          'button',
+          {
+            class: `sound-tile${c.id === selected ? ' on' : ''}`,
+            role: 'radio',
+            'aria-checked': c.id === selected ? 'true' : 'false',
+            onclick: async () => {
+              setMetronome({ sound: c.id });
+              draw(c.id);
+              // Preview: accent then a normal beat.
+              const ctx = await ensureRunning();
+              const vol = getSettings().metronome.volume;
+              playClick(ctx, getMaster(), ctx.currentTime + 0.02, 'accent', c.id, vol);
+              playClick(ctx, getMaster(), ctx.currentTime + 0.32, 'normal', c.id, vol);
+            },
+          },
+          c.label,
+        ),
+      ),
+    );
+  draw(current);
+  return grid;
+}
+
 function openTempoSheet() {
   const bpm = () => getSettings().metronome.bpm;
   let close = () => {};
@@ -121,7 +151,7 @@ function openMetronomeOptions() {
   const body = h(
     'div',
     { class: 'stack' },
-    field('Click sound', segmented(CLICK_SOUNDS.map((c) => ({ value: c.id, label: c.label })), m.sound, (v) => setMetronome({ sound: v as typeof m.sound }), 'Click sound')),
+    h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Click sound (tap to hear)'), soundGrid(m.sound)),
     section('Count-in', 'Bars of clicks before bar one, so you can breathe and come in on time.', field('Bars', num(m.countInBars, (n) => setMetronome({ countInBars: n }), 0, 4))),
     section(
       'Polyrhythm',

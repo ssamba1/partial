@@ -2988,6 +2988,23 @@ canvas.page {
   font-weight: 650;
 }
 
+.sound-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+}
+.sound-tile {
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  background: var(--surface-2);
+  color: var(--text);
+  font: 600 0.82rem var(--font-ui);
+}
+.sound-tile.on {
+  background: color-mix(in srgb, var(--brand) 18%, var(--surface));
+  border-color: var(--brand);
+}
 .midi-rows {
   display: flex;
   flex-direction: column;
