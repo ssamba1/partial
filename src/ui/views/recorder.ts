@@ -1,6 +1,7 @@
 import { acquireMic, ensureRunning, getContext, MicError, releaseMic } from '../../audio/context';
 import { formatCents, formatDuration, uid } from '../../core/format';
 import { analyzeTake, type TakeReport } from '../../core/intonation';
+import { encodeWav, pitchShift } from '../../core/pitchshift';
 import { frequencyToNote, noteName, prettyName } from '../../core/notes';
 import { detectPitch, rms } from '../../core/pitch';
 import { db, type RecordingEntry } from '../../store/db';
@@ -256,6 +257,45 @@ export function mountRecorder(root: HTMLElement) {
       'Playback speed',
     );
 
+    // Transpose playback without changing speed: render a shifted copy once per setting.
+    const shifted = new Map<number, string>();
+    let shiftToken = 0;
+    const transpose = segmented(
+      ['-2', '-1', '0', '1', '2'].map((v) => ({ value: v, label: v === '0' ? '0 st' : `${Number(v) > 0 ? '+' : '−'}${Math.abs(Number(v))}` })),
+      '0',
+      async (v) => {
+        const semis = Number(v);
+        const token = ++shiftToken;
+        const wasPlaying = !audio.paused;
+        const at = audio.currentTime;
+        const rate = audio.playbackRate;
+        let src = url;
+        if (semis !== 0) {
+          src = shifted.get(semis) ?? '';
+          if (!src) {
+            toast('Transposing this take…');
+            try {
+              const buffer = await decode(item.blob);
+              await new Promise((r) => setTimeout(r, 20));
+              const wav = encodeWav(pitchShift(mono(buffer), semis, buffer.sampleRate), buffer.sampleRate);
+              src = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
+              urls.add(src);
+              shifted.set(semis, src);
+            } catch (err) {
+              toast(`Could not transpose: ${(err as Error).message}`);
+              return;
+            }
+          }
+        }
+        if (token !== shiftToken) return;
+        audio.src = src;
+        audio.playbackRate = rate;
+        audio.currentTime = at;
+        if (wasPlaying) void audio.play();
+      },
+      'Transpose playback',
+    );
+
     const name = h('input', {
       type: 'text',
       class: 'take-name',
@@ -307,7 +347,7 @@ export function mountRecorder(root: HTMLElement) {
       h(
         'div',
         { class: 'take-actions' },
-        speed,
+        h('div', { class: 'row tight wrap' }, speed, isVideo ? null : transpose),
         h(
           'div',
           { class: 'row tight' },

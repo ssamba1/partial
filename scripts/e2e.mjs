@@ -261,6 +261,29 @@ await check('recorder saves a take and reports intonation', async () => {
   return text.slice(0, 60);
 });
 
+await check('recorder transposes a take up two semitones', async () => {
+  await open('record');
+  const hz = await run(`${FAKE_MIC}
+    window.__fake.o.type = 'sine'; window.__fake.o.frequency.value = 440;
+    document.querySelector('.record-btn').click(); await wait(2000); document.querySelector('.record-btn').click(); await wait(1500);
+    const take = document.querySelector('.take');
+    [...take.querySelectorAll('.seg-btn')].find((b) => b.textContent === '+2').click();
+    const audio = take.querySelector('audio');
+    const original = audio.src;
+    // The transposed copy replaces the source once it has been rendered.
+    for (let i = 0; i < 60 && audio.src === original; i++) await wait(250);
+    const buf = await new AudioContext().decodeAudioData(await (await fetch(audio.src)).arrayBuffer());
+    const d = buf.getChannelData(0);
+    // Count rising zero crossings over the middle of the take.
+    const start = Math.floor(d.length * 0.3), end = Math.floor(d.length * 0.7);
+    let crossings = 0; for (let i = start + 1; i < end; i++) if (d[i - 1] < 0 && d[i] >= 0) crossings++;
+    return crossings / ((end - start) / buf.sampleRate);`);
+  const expected = 440 * Math.pow(2, 2 / 12);
+  const cents = 1200 * Math.log2(hz / expected);
+  assert(Math.abs(cents) < 15, `measured ${hz.toFixed(1)} Hz, expected ${expected.toFixed(1)}`);
+  return `${hz.toFixed(1)} Hz (expected ${expected.toFixed(1)})`;
+});
+
 await check('sheet music: import, annotate, half-page turn', async () => {
   await open('sheet');
   const out = await run(`
