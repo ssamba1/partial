@@ -1,7 +1,7 @@
 import { activeNotes, isOn, noteOff, noteOn, onDronesChange, setTimbreAll, stopAll, toggleNote } from '../../audio/droneBank';
 import { DRONE_TIMBRES, type DroneTimbre } from '../../audio/voices';
 import { angleDelta, pointAngle } from '../../core/gestures';
-import { midiToFrequency, mod, NOTE_NAMES_FLAT, NOTE_NAMES_SHARP, noteName } from '../../core/notes';
+import { midiToFrequency, mod, noteName, prettyName } from '../../core/notes';
 import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
 import { capturePointer, holdButton, segmented, svgEl } from '../components';
 import { field, h, select } from '../dom';
@@ -143,7 +143,7 @@ export function mountSound(root: HTMLElement) {
           'aria-label': `${noteName(m, s.flats)} ${midiToFrequency(m, tuning).toFixed(1)} Hz`,
           style: isBlack ? `--x:${whiteIndex}` : '',
         },
-        !isBlack ? h('span', { class: 'key-label' }, pc === 0 ? noteName(m, s.flats) : '') : null,
+        !isBlack ? h('span', { class: 'key-label' }, pc === 0 ? prettyName(noteName(m, s.flats)) : '') : null,
       );
       key.addEventListener('pointerdown', (e) => {
         capturePointer(key, e.pointerId);
@@ -197,7 +197,7 @@ export function mountSound(root: HTMLElement) {
   function render() {
     const s = getSettings();
     const tuning = tuningOf(s);
-    const names = s.flats ? NOTE_NAMES_FLAT : NOTE_NAMES_SHARP;
+    const names = Array.from({ length: 12 }, (_, pc) => prettyName(noteName(pc, s.flats, false)));
     const on = new Set(activeNotes().map((m) => m));
     wedges.forEach((g, pc) => {
       const midi = (s.drone.octave + 1) * 12 + pc;
@@ -212,7 +212,7 @@ export function mountSound(root: HTMLElement) {
     const list = activeNotes();
     sounding.replaceChildren(
       ...(list.length
-        ? list.map((m) => h('button', { class: 'note-pill', onclick: () => noteOff(m), 'aria-label': `Stop ${noteName(m, s.flats)}` }, h('b', null, noteName(m, s.flats)), h('span', null, `${midiToFrequency(m, tuning).toFixed(2)} Hz`), icon('close', 14)))
+        ? list.map((m) => h('button', { class: 'note-pill', onclick: () => noteOff(m), 'aria-label': `Stop ${noteName(m, s.flats)}` }, h('b', null, prettyName(noteName(m, s.flats))), h('span', null, `${midiToFrequency(m, tuning).toFixed(2)} Hz`), icon('close', 14)))
         : [h('span', { class: 'muted' }, sustain ? 'Tap a note to start a drone. Tap again to stop it.' : 'Notes sound while you hold them.')]),
     );
     view.dataset.view = s.drone.view;
@@ -267,12 +267,11 @@ export function mountSound(root: HTMLElement) {
   buildPiano();
   render();
 
-  let lastFlats = s0.flats;
-  let lastA4 = s0.a4;
+  let pianoKey = `${s0.flats}|${s0.a4}|${s0.notation}|${s0.temperament}|${s0.tonic}`;
   const offSettings = subscribeSettings((s) => {
-    if (s.flats !== lastFlats || s.a4 !== lastA4) {
-      lastFlats = s.flats;
-      lastA4 = s.a4;
+    const key = `${s.flats}|${s.a4}|${s.notation}|${s.temperament}|${s.tonic}`;
+    if (key !== pianoKey) {
+      pianoKey = key;
       buildPiano();
     }
     render();

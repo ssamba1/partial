@@ -29,7 +29,10 @@ metronome.onBeat((e) => {
 subscribeSettings((s) => {
   const m = s.metronome;
   const cur = metronome.settings;
-  const keys = ['bpm', 'beatsPerBar', 'beatUnit', 'subdivision', 'sound', 'volume', 'accents', 'trainerBars', 'trainerStep', 'trainerMax'] as const;
+  const keys = [
+    'bpm', 'beatsPerBar', 'beatUnit', 'subdivision', 'sound', 'volume', 'accents',
+    'trainerBars', 'trainerStep', 'trainerMax', 'countInBars', 'poly', 'playBars', 'muteBars', 'randomMute', 'stopAfterBars',
+  ] as const;
   if (keys.some((k) => m[k] !== cur[k])) metronome.update(m);
 });
 

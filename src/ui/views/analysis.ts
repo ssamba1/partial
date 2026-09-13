@@ -1,6 +1,6 @@
 import { MicError } from '../../audio/context';
 import { formatCents } from '../../core/format';
-import { noteName } from '../../core/notes';
+import { noteName, prettyName } from '../../core/notes';
 import { harmonicLevels, magnitudeSpectrum } from '../../core/spectrum';
 import { clefFor, staffNote, type Clef } from '../../core/staff';
 import { getSettings } from '../../store/settings';
@@ -30,10 +30,10 @@ export function mountAnalysis(root: HTMLElement) {
   let lastF0: number | null = null;
 
   const canvas = h('canvas', { class: 'analysis-canvas', 'aria-label': 'Analysis chart' });
-  const noteStat = h('b', null, '–');
-  const centsStat = h('b', null, '–');
-  const hzStat = h('b', null, '–');
-  const tuneStat = h('b', null, '–');
+  const noteStat = h('b', null, '·');
+  const centsStat = h('b', null, '·');
+  const hzStat = h('b', null, '·');
+  const tuneStat = h('b', null, '·');
   const stats = h(
     'div',
     { class: 'stat-strip' },
@@ -110,7 +110,7 @@ export function mountAnalysis(root: HTMLElement) {
 
     const s = getSettings();
     if (f.note && f.frequency) {
-      noteStat.textContent = noteName(f.note.midi, s.flats);
+      noteStat.textContent = prettyName(noteName(f.note.midi, s.flats));
       centsStat.textContent = formatCents(f.note.cents);
       hzStat.textContent = f.frequency.toFixed(1);
       centsStat.className = Math.abs(f.note.cents) <= s.tolerance ? 'good' : f.note.cents > 0 ? 'sharp' : 'flat';
@@ -175,7 +175,7 @@ export function mountAnalysis(root: HTMLElement) {
       ctx.lineTo(w, Math.round(yOf(m)) + 0.5);
       ctx.stroke();
       ctx.fillStyle = isCenter ? cssVar('--text') : cssVar('--faint');
-      ctx.fillText(noteName(m, flats).replace('#', '♯').replace('b', '♭'), 6, yOf(m) + 4);
+      ctx.fillText(prettyName(noteName(m, flats)), 6, yOf(m) + 4);
     }
     // One continuous path per run of the same colour; gaps only where the sound actually stopped.
     ctx.lineWidth = 3;

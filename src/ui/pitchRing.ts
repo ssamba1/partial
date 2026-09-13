@@ -1,4 +1,4 @@
-import { NOTE_NAMES_FLAT, NOTE_NAMES_SHARP } from '../core/notes';
+import { noteName, prettyName } from '../core/notes';
 import { svgEl } from './components';
 import { h } from './dom';
 
@@ -110,23 +110,24 @@ export function createPitchRing(): PitchRing {
   let lastPc: number | null = null;
 
   const layoutNotes = (flats: boolean) => {
-    const names = flats ? NOTE_NAMES_FLAT : NOTE_NAMES_SHARP;
     for (let pc = 0; pc < 12; pc++) {
       const [x, y] = polar(NOTE_R, pc * 30);
       dots[pc].setAttribute('cx', String(x));
       dots[pc].setAttribute('cy', String(y));
       labels[pc].setAttribute('x', String(x));
       labels[pc].setAttribute('y', String(y));
-      labels[pc].textContent = names[pc].replace('#', '♯').replace('b', '♭');
+      const name = prettyName(noteName(pc, flats, false));
+      labels[pc].textContent = name;
+      labels[pc].classList.toggle('long', name.length > 2);
     }
   };
-  layoutNotes(false);
-  let lastFlats = false;
+  let lastKey = '';
 
   const update = (r: RingReading, tolerance: number, flats: boolean) => {
-    if (flats !== lastFlats) {
+    const key = `${flats}|${noteName(0, flats, false)}`;
+    if (key !== lastKey) {
       layoutNotes(flats);
-      lastFlats = flats;
+      lastKey = key;
     }
     const tol = Math.max(0.5, tolerance) * DEG_PER_CENT;
     zone.setAttribute('d', arcPath(ARC_R, -tol, tol));

@@ -2,7 +2,9 @@ import { ensureRunning, getMaster, MicError } from '../../audio/context';
 import { Drone } from '../../audio/voices';
 import { formatCents } from '../../core/format';
 import { nearestString, STRING_INSTRUMENTS, stringFrequency } from '../../core/instruments';
-import { noteName, TRANSPOSITIONS, transpose } from '../../core/notes';
+import { noteOff, noteOn } from '../../audio/droneBank';
+import { addReading, advanceStrobe, summarize, type Tendencies } from '../../core/intonation';
+import { noteName, prettyName, TRANSPOSITIONS, transpose } from '../../core/notes';
 import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
 import { haptic, iconButton, openSheet, segmented } from '../components';
 import { cssVar, errorBox, fitCanvas, h, select } from '../dom';
@@ -64,6 +66,22 @@ function openTunerOptions() {
     h(
       'label',
       { class: 'switch-row' },
+      h('span', null, h('strong', null, 'Drone follows you'), h('small', null, 'Plays the in-tune reference for the note you are holding, so you can hear the beats against it. Use headphones.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: s.followDrone, onchange: (e: Event) => updateSettings({ followDrone: (e.target as HTMLInputElement).checked }) }),
+    ),
+    h(
+      'button',
+      {
+        class: 'pill-btn',
+        onclick: () => {
+          if (confirm('Clear your saved intonation tendencies?')) updateSettings({ tendencies: {} });
+        },
+      },
+      'Reset tendencies',
+    ),
+    h(
+      'label',
+      { class: 'switch-row' },
       h('span', null, h('strong', null, 'Ignore the metronome'), h('small', null, 'Skips the instant each click sounds, so the tuner keeps reading your note while the metronome plays.')),
       h('input', { type: 'checkbox', role: 'switch', checked: s.ignoreClick, onchange: (e: Event) => updateSettings({ ignoreClick: (e.target as HTMLInputElement).checked }) }),
     ),
@@ -83,7 +101,7 @@ export function mountTuner(root: HTMLElement) {
 
   /* ----- Display elements ----- */
   const ring = createPitchRing();
-  const noteEl = h('span', { class: 'big-note' }, '–');
+  const noteEl = h('span', { class: 'big-note' }, '·');
   const accidentalEl = h('span', { class: 'big-acc' });
   const octaveEl = h('span', { class: 'big-oct' });
   const centsEl = h('div', { class: 'big-cents' }, '');
@@ -92,7 +110,7 @@ export function mountTuner(root: HTMLElement) {
 
   const barNeedle = h('div', { class: 'bar-needle' });
   const barZone = h('div', { class: 'bar-zone' });
-  const barNote = h('div', { class: 'bar-note' }, '–');
+  const barNote = h('div', { class: 'bar-note' }, '·');
   const barCents = h('div', { class: 'bar-cents' });
   const barMeter = h(
     'div',
@@ -103,12 +121,127 @@ export function mountTuner(root: HTMLElement) {
   );
   const barView = h('div', { class: 'bar-view' }, h('div', { class: 'bar-head' }, barNote, barCents), barMeter, h('div', { class: 'bar-legend' }, h('span', null, '♭ flat'), h('span', null, 'sharp ♯')));
 
+  /* ----- Strobe display ----- */
+  const strobeCanvas = h('canvas', { class: 'strobe-canvas', 'aria-hidden': 'true' });
+  const strobeNote = h('div', { class: 'bar-note' }, '·');
+  const strobeCents = h('div', { class: 'bar-cents' });
+  const strobeView = h(
+    'div',
+    { class: 'strobe-view' },
+    h('div', { class: 'bar-head' }, strobeNote, strobeCents),
+    h('div', { class: 'strobe-frame' }, strobeCanvas),
+    h('div', { class: 'bar-legend' }, h('span', null, '← flat drifts left'), h('span', null, 'still = in tune'), h('span', null, 'sharp drifts right →')),
+  );
+  const strobePhases = [0, 0, 0];
+  let strobeLast = 0;
+  function drawStrobe(cents: number | null, now: number) {
+    const dt = strobeLast ? Math.min(0.1, (now - strobeLast) / 1000) : 0;
+    strobeLast = now;
+    const ctx = fitCanvas(strobeCanvas);
+    const w = strobeCanvas.clientWidth;
+    const hh = strobeCanvas.clientHeight;
+    ctx.clearRect(0, 0, w, hh);
+    const rows = 3;
+    const rowH = hh / rows;
+    const tol = getSettings().tolerance;
+    const color = cents === null ? cssVar('--surface-3') : Math.abs(cents) <= tol ? cssVar('--good') : cents > 0 ? cssVar('--sharp') : cssVar('--flat');
+    for (let r = 0; r < rows; r++) {
+      // Each row shows a higher partial: it moves 2x and 4x faster, like a multi-band strobe.
+      if (cents !== null) strobePhases[r] = advanceStrobe(strobePhases[r], cents * Math.pow(2, r), dt, 0.12);
+      const bandW = w / (8 * Math.pow(2, r));
+      const offset = strobePhases[r] * bandW * 2;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.85 - r * 0.2;
+      for (let x = -bandW * 2 + offset; x < w + bandW; x += bandW * 2) {
+        ctx.fillRect(x, r * rowH + 3, bandW, rowH - 6);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   const freqEl = h('div', { class: 'tuner-meta' }, h('span', null, 'Play a note to begin'));
   const levelFill = h('div', { class: 'level-fill' });
   const trace = h('canvas', { class: 'trace', 'aria-hidden': 'true' });
   const errorSlot = h('div');
 
-  const display = h('button', { class: 'tuner-stage', 'aria-label': 'Start or stop the tuner', onclick: () => void toggle() }, ring.el, barView);
+  const display = h('button', { class: 'tuner-stage', 'aria-label': 'Start or stop the tuner', onclick: () => void toggle() }, ring.el, barView, strobeView);
+
+  /* ----- Intonation tendencies ----- */
+  let pendingTend: Tendencies = {};
+  let pendingCount = 0;
+  const tendBars = h('div', { class: 'tend-bars' });
+  const tendCaption = h('span', { class: 'muted small' });
+  const tendPanel = h(
+    'div',
+    { class: 'trace-wrap tendencies' },
+    h('div', { class: 'trace-label' }, h('span', null, 'Your tendencies'), tendCaption),
+    tendBars,
+  );
+  function flushTendencies() {
+    if (!pendingCount) return;
+    const add = pendingTend;
+    pendingTend = {};
+    pendingCount = 0;
+    updateSettings((s) => {
+      const merged: Tendencies = { ...s.tendencies };
+      for (const [pc, st] of Object.entries(add)) {
+        const cur = merged[Number(pc)] ?? { count: 0, sum: 0, sumSq: 0 };
+        merged[Number(pc)] = { count: cur.count + st.count, sum: cur.sum + st.sum, sumSq: cur.sumSq + st.sumSq };
+      }
+      return { tendencies: merged };
+    });
+  }
+  const flushTimer = window.setInterval(flushTendencies, 5000);
+  function renderTendencies() {
+    const s = getSettings();
+    const combined: Tendencies = { ...s.tendencies };
+    for (const [pc, st] of Object.entries(pendingTend)) {
+      const cur = combined[Number(pc)] ?? { count: 0, sum: 0, sumSq: 0 };
+      combined[Number(pc)] = { count: cur.count + st.count, sum: cur.sum + st.sum, sumSq: cur.sumSq + st.sumSq };
+    }
+    const stats = summarize(combined, 20);
+    const byPc = new Map(stats.map((x) => [x.pitchClass, x]));
+    tendCaption.textContent = stats.length ? 'average cents per note, all sessions' : 'Play for a while to see which notes you tend to play sharp or flat';
+    tendBars.replaceChildren(
+      ...Array.from({ length: 12 }, (_, pc) => {
+        const st = byPc.get(pc);
+        const mean = st ? Math.max(-25, Math.min(25, st.mean)) : 0;
+        const cls = !st ? 'none' : Math.abs(st.mean) <= s.tolerance ? 'good' : st.mean > 0 ? 'sharp' : 'flat';
+        return h(
+          'div',
+          { class: `tend ${cls}`, title: st ? `${noteName(pc, s.flats, false)}: ${formatCents(st.mean)} average, ±${st.spread.toFixed(1)}¢ spread, ${st.count} readings` : `${noteName(pc, s.flats, false)}: not enough readings yet` },
+          h('div', { class: 'tend-track' }, h('i', { style: `height:${(Math.abs(mean) / 25) * 50}%;${mean >= 0 ? 'bottom:50%' : 'top:50%'}` })),
+          h('span', null, prettyName(noteName(pc, s.flats, false))),
+          h('b', null, st ? formatCents(st.mean) : ''),
+        );
+      }),
+    );
+  }
+
+  /* ----- Drone that follows you ----- */
+  let followMidi: number | null = null;
+  let candidateMidi: number | null = null;
+  let candidateSince = 0;
+  function followNote(concertMidi: number | null, time: number) {
+    if (!getSettings().followDrone) {
+      if (followMidi !== null) {
+        noteOff(followMidi);
+        followMidi = null;
+      }
+      return;
+    }
+    if (concertMidi === null) return;
+    if (concertMidi !== candidateMidi) {
+      candidateMidi = concertMidi;
+      candidateSince = time;
+      return;
+    }
+    if (time - candidateSince >= 0.35 && followMidi !== concertMidi) {
+      if (followMidi !== null) noteOff(followMidi);
+      followMidi = concertMidi;
+      void noteOn(concertMidi);
+    }
+  }
 
   /* ----- Strings mode ----- */
   const stringsRow = h('div', { class: 'strings-row', role: 'group', 'aria-label': 'Strings' });
@@ -134,14 +267,15 @@ export function mountTuner(root: HTMLElement) {
     const s = getSettings();
     pureChip.hidden = inst.pureFifthsFrom === undefined;
     autoChip.classList.toggle('on', manualString === null);
-    if (stringsRow.children.length !== inst.strings.length || stringsRow.dataset.inst !== inst.id + s.flats) {
-      stringsRow.dataset.inst = inst.id + s.flats;
+    const rowKey = `${inst.id}|${noteName(1, s.flats, false)}`;
+    if (stringsRow.children.length !== inst.strings.length || stringsRow.dataset.inst !== rowKey) {
+      stringsRow.dataset.inst = rowKey;
       stringsRow.replaceChildren(
         ...inst.strings.map((midi, i) =>
           h(
             'button',
             { class: 'string-btn', 'data-i': i, onclick: (e: Event) => { e.stopPropagation(); void pressString(i); } },
-            h('span', { class: 'string-name' }, noteName(midi, s.flats, false)),
+            h('span', { class: 'string-name' }, prettyName(noteName(midi, s.flats, false))),
             h('span', { class: 'string-oct' }, String(Math.floor(midi / 12) - 1)),
             h('span', { class: 'string-dot' }),
           ),
@@ -240,7 +374,16 @@ export function mountTuner(root: HTMLElement) {
       renderStrings(manualString, null);
     }
 
-    if (!f.held && !f.gated) recordTuningFrame(cents);
+    if (!f.held && !f.gated) {
+      recordTuningFrame(cents);
+      if (s.tunerMode === 'chromatic' && f.note && displayMidi !== null) {
+        pendingTend = addReading(pendingTend, ((displayMidi % 12) + 12) % 12, f.note.cents);
+        pendingCount++;
+        if (pendingCount % 30 === 0) renderTendencies();
+      }
+    }
+    followNote(f.note && !f.held ? f.note.midi : null, f.time);
+    if (s.tunerDisplay === 'strobe') drawStrobe(cents, performance.now());
     history.push({ t: f.time, cents });
     while (history.length && f.time - history[0].t > HISTORY_SECONDS) history.shift();
 
@@ -270,15 +413,19 @@ export function mountTuner(root: HTMLElement) {
     }
 
     root.querySelector('.tuner')?.classList.add('has-note');
-    const name = noteName(displayMidi, s.flats, false);
-    noteEl.textContent = name[0];
-    accidentalEl.textContent = name.slice(1).replace('#', '♯').replace('b', '♭');
+    const pretty = prettyName(noteName(displayMidi, s.flats, false));
+    const accidental = pretty.match(/[♯♭]/)?.[0] ?? '';
+    noteEl.textContent = pretty.replace(accidental, '');
+    noteEl.classList.toggle('long', noteEl.textContent.length > 1);
+    accidentalEl.textContent = accidental;
     octaveEl.textContent = String(Math.floor(displayMidi / 12) - 1);
     // Words as well as colour, so the state reads without relying on colour vision.
     const direction = `${Math.abs(Math.round(cents))}¢ ${cents > 0 ? 'sharp' : 'flat'}`;
     centsEl.textContent = inTune ? 'in tune' : direction;
-    barNote.textContent = `${name.replace('#', '♯').replace('b', '♭')}${Math.floor(displayMidi / 12) - 1}`;
+    barNote.textContent = `${pretty}${Math.floor(displayMidi / 12) - 1}`;
     barCents.textContent = inTune ? `${formatCents(cents)} in tune` : direction;
+    strobeNote.textContent = barNote.textContent;
+    strobeCents.textContent = barCents.textContent;
     barNeedle.style.left = `${50 + Math.max(-50, Math.min(50, cents))}%`;
     barMeter.classList.toggle('good', inTune);
 
@@ -346,6 +493,7 @@ export function mountTuner(root: HTMLElement) {
     [
       { value: 'ring', label: 'Ring', icon: 'ring' },
       { value: 'bar', label: 'Bar', icon: 'bar' },
+      { value: 'strobe', label: 'Strobe', icon: 'strobe' },
     ],
     s0.tunerDisplay,
     (v) => updateSettings({ tunerDisplay: v as Settings['tunerDisplay'] }),
@@ -362,6 +510,7 @@ export function mountTuner(root: HTMLElement) {
     freqEl,
     errorSlot,
     h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, h('span', null, 'Last 10 seconds'), h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace),
+    tendPanel,
   );
   root.append(view);
 
@@ -376,8 +525,12 @@ export function mountTuner(root: HTMLElement) {
     barZone.style.width = `${s.tolerance * 2}%`;
     instrumentSelect.value = s.stringInstrument;
     if (s.tunerMode === 'strings') renderStrings(manualString, null);
-    ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats);
+    // Only reset the display when idle; settings also change while tuning (e.g. saving tendencies).
+    if (!tracker.running) ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats);
+    tendPanel.hidden = s.tunerMode !== 'chromatic';
+    renderTendencies();
     drawTrace();
+    if (s.tunerDisplay === 'strobe') drawStrobe(null, performance.now());
   }
   applySettings();
   const offSettings = subscribeSettings(applySettings);
@@ -401,5 +554,8 @@ export function mountTuner(root: HTMLElement) {
     stopRef();
     tracker.stop();
     timer.stop();
+    window.clearInterval(flushTimer);
+    flushTendencies();
+    if (followMidi !== null) noteOff(followMidi);
   };
 }

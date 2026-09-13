@@ -22,6 +22,8 @@ export interface ClickEvent {
   bpm: number;
   section: number;
   countIn: boolean;
+  /** Silenced by the gap trainer or random muting; still shown visually. */
+  muted?: boolean;
 }
 
 export const MIN_BPM = 20;
@@ -126,6 +128,51 @@ export function expandClickTrack(track: ClickTrack): { events: ClickEvent[]; dur
   });
 
   return { events, duration: t };
+}
+
+/** Gap trainer: play `playBars`, then silence `muteBars`, repeating. Bar indices start at 0. */
+export function isBarMuted(bar: number, playBars: number, muteBars: number): boolean {
+  if (muteBars <= 0 || playBars <= 0 || bar < 0) return false;
+  return bar % (playBars + muteBars) >= playBars;
+}
+
+/** Deterministic pseudo-random value in [0, 1) for a (bar, beat) pair, so random muting is reproducible. */
+export function beatNoise(bar: number, beat: number, seed: number): number {
+  let x = (bar * 374761393 + beat * 668265263 + seed * 2147483647) | 0;
+  x = Math.imul(x ^ (x >>> 13), 1274126177);
+  x ^= x >>> 16;
+  return (x >>> 0) / 4294967296;
+}
+
+/** Random beat silencing for internal-time practice. Beat 1 is never silenced so you can find the bar. */
+export function isBeatRandomlyMuted(bar: number, beat: number, percent: number, seed: number): boolean {
+  if (percent <= 0 || beat === 0) return false;
+  return beatNoise(bar, beat, seed) < percent / 100;
+}
+
+/** Offsets (seconds from the bar start) of `pulses` evenly spaced clicks across one bar, for polyrhythms. */
+export function polyOffsets(barSeconds: number, pulses: number): number[] {
+  const n = Math.max(0, Math.floor(pulses));
+  return Array.from({ length: n }, (_, i) => (i * barSeconds) / n);
+}
+
+export const TEMPO_MARKINGS: { name: string; min: number; max: number }[] = [
+  { name: 'Larghissimo', min: 20, max: 24 },
+  { name: 'Grave', min: 25, max: 45 },
+  { name: 'Largo', min: 40, max: 60 },
+  { name: 'Larghetto', min: 60, max: 66 },
+  { name: 'Adagio', min: 66, max: 76 },
+  { name: 'Andante', min: 76, max: 108 },
+  { name: 'Moderato', min: 108, max: 120 },
+  { name: 'Allegro', min: 120, max: 156 },
+  { name: 'Vivace', min: 156, max: 176 },
+  { name: 'Presto', min: 168, max: 200 },
+  { name: 'Prestissimo', min: 200, max: 400 },
+];
+
+/** Common tempo name for a BPM. Ranges overlap in practice; this picks the first range containing the tempo. */
+export function tempoMarking(bpm: number): string {
+  return (TEMPO_MARKINGS.find((m) => bpm >= m.min && bpm < m.max) ?? TEMPO_MARKINGS[TEMPO_MARKINGS.length - 1]).name;
 }
 
 /** Tempo from tap timestamps (ms). Uses the median interval of recent taps. */

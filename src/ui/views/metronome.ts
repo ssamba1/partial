@@ -1,28 +1,13 @@
 import { CLICK_SOUNDS } from '../../audio/voices';
 import { uid } from '../../core/format';
-import { clampBpm, defaultAccents, MAX_BPM, MIN_BPM, tapTempo, type AccentLevel } from '../../core/rhythm';
+import { clampBpm, defaultAccents, MAX_BPM, MIN_BPM, tapTempo, TEMPO_MARKINGS, tempoMarking, type AccentLevel } from '../../core/rhythm';
 import { getSettings, subscribeSettings, updateSettings, type BeatVisual, type Settings } from '../../store/settings';
 import { dial, holdButton, iconButton, openSheet, segmented, toast } from '../components';
 import { field, h, numberInput, select } from '../dom';
 import { icon } from '../icons';
 import { metronome } from '../shared';
 
-const TEMPO_MARKINGS: [number, string][] = [
-  [40, 'Grave'],
-  [60, 'Largo'],
-  [66, 'Larghetto'],
-  [76, 'Adagio'],
-  [108, 'Andante'],
-  [120, 'Moderato'],
-  [156, 'Allegro'],
-  [176, 'Vivace'],
-  [200, 'Presto'],
-  [Infinity, 'Prestissimo'],
-];
-
-function marking(bpm: number): string {
-  return TEMPO_MARKINGS.find(([max]) => bpm < max)![1];
-}
+const marking = tempoMarking;
 
 const NEXT_ACCENT: Record<AccentLevel, AccentLevel> = { normal: 'accent', accent: 'silent', silent: 'normal' };
 
@@ -88,29 +73,95 @@ function openMeterSheet() {
   close = openSheet('Time signature', h('div', { class: 'stack' }, grid, field('Custom', custom)));
 }
 
+function openTempoSheet() {
+  const bpm = () => getSettings().metronome.bpm;
+  let close = () => {};
+  const body = h(
+    'div',
+    { class: 'stack' },
+    h(
+      'div',
+      { class: 'tempo-jumps' },
+      h('button', { class: 'pill-btn', onclick: () => setMetronome({ bpm: bpm() / 2 }) }, '½  half time'),
+      h('button', { class: 'pill-btn', onclick: () => setMetronome({ bpm: bpm() - 10 }) }, '−10'),
+      h('button', { class: 'pill-btn', onclick: () => setMetronome({ bpm: bpm() + 10 }) }, '+10'),
+      h('button', { class: 'pill-btn', onclick: () => setMetronome({ bpm: bpm() * 2 }) }, '×2  double'),
+    ),
+    h(
+      'div',
+      { class: 'marking-list' },
+      TEMPO_MARKINGS.map((mk) => {
+        const mid = Math.round((mk.min + Math.min(mk.max, 240)) / 2);
+        return h(
+          'button',
+          {
+            class: `marking-row${bpm() >= mk.min && bpm() < mk.max ? ' on' : ''}`,
+            onclick: () => {
+              setMetronome({ bpm: mid });
+              close();
+            },
+          },
+          h('b', null, mk.name),
+          h('span', null, `${mk.min} to ${mk.max}`),
+        );
+      }),
+    ),
+    h('p', { class: 'muted small' }, 'Tempo names cover overlapping ranges; tapping one jumps to the middle of its range.'),
+  );
+  close = openSheet('Tempo', body);
+}
+
 function openMetronomeOptions() {
   const m = getSettings().metronome;
+  const num = (value: number, onChange: (n: number) => void, min: number, max: number) =>
+    numberInput(value, (n) => onChange(Math.min(max, Math.max(min, Math.round(n)))), { min, max });
+  const section = (title: string, text: string, ...controls: HTMLElement[]) =>
+    h('div', { class: 'option-section' }, h('div', null, h('h3', null, title), h('p', { class: 'muted small' }, text)), h('div', { class: 'option-controls' }, ...controls));
+
   const body = h(
     'div',
     { class: 'stack' },
     field('Click sound', segmented(CLICK_SOUNDS.map((c) => ({ value: c.id, label: c.label })), m.sound, (v) => setMetronome({ sound: v as typeof m.sound }), 'Click sound')),
+    section('Count-in', 'Bars of clicks before bar one, so you can breathe and come in on time.', field('Bars', num(m.countInBars, (n) => setMetronome({ countInBars: n }), 0, 4))),
+    section(
+      'Polyrhythm',
+      'A second sound plays this many even pulses across each bar. 3 in a 4/4 bar gives 3 against 4.',
+      field('Pulses per bar (0 off)', num(m.poly, (n) => setMetronome({ poly: n }), 0, 16)),
+    ),
+    section(
+      'Gap trainer',
+      'Play some bars with the click, then some in silence. Keeps your time honest without the metronome holding your hand.',
+      field('Play bars', num(m.playBars, (n) => setMetronome({ playBars: n }), 0, 32)),
+      field('Silent bars (0 off)', num(m.muteBars, (n) => setMetronome({ muteBars: n }), 0, 32)),
+    ),
+    section(
+      'Random silence',
+      'Drops random beats (never beat 1). The beat still lights up so you can check yourself.',
+      field('Percent of beats', segmented([0, 10, 25, 50].map((p) => ({ value: String(p), label: p ? `${p}%` : 'Off' })), String(m.randomMute), (v) => setMetronome({ randomMute: Number(v) }), 'Random silence')),
+    ),
+    section(
+      'Speed trainer',
+      'Raise the tempo automatically as you play.',
+      field('Every (bars, 0 off)', num(m.trainerBars, (n) => setMetronome({ trainerBars: n }), 0, 64)),
+      field('Add BPM', num(m.trainerStep, (n) => setMetronome({ trainerStep: n }), 1, 20)),
+      field('Stop at', num(m.trainerMax, (n) => setMetronome({ trainerMax: clampBpm(n) }), MIN_BPM, MAX_BPM)),
+    ),
+    section('Stop after', 'End automatically after a set number of bars, like a performance run-through.', field('Bars (0 never)', num(m.stopAfterBars, (n) => setMetronome({ stopAfterBars: n }), 0, 999))),
     h(
       'label',
       { class: 'switch-row' },
       h('span', null, h('strong', null, 'Flash the screen'), h('small', null, 'A full-screen flash on every beat, for loud rooms or ensembles.')),
       h('input', { type: 'checkbox', role: 'switch', checked: m.flashScreen, onchange: (e: Event) => setMetronome({ flashScreen: (e.target as HTMLInputElement).checked }) }),
     ),
-    h('h3', null, 'Speed trainer'),
-    h('p', { class: 'muted small' }, 'Raise the tempo automatically as you play. Set bars to 0 to turn it off.'),
-    h(
-      'div',
-      { class: 'grid three' },
-      field('Every (bars)', numberInput(m.trainerBars, (n) => setMetronome({ trainerBars: Math.max(0, Math.round(n)) }), { min: 0, max: 64 })),
-      field('Add BPM', numberInput(m.trainerStep, (n) => setMetronome({ trainerStep: Math.max(1, Math.round(n)) }), { min: 1, max: 20 })),
-      field('Stop at', numberInput(m.trainerMax, (n) => setMetronome({ trainerMax: clampBpm(n) }), { min: MIN_BPM, max: MAX_BPM })),
-    ),
+    h('button', {
+      class: 'pill-btn',
+      onclick: () => {
+        setMetronome({ countInBars: 0, poly: 0, playBars: 0, muteBars: 0, randomMute: 0, stopAfterBars: 0, trainerBars: 0 });
+        toast('Practice modes turned off');
+      },
+    }, 'Turn all practice modes off'),
   );
-  openSheet('Metronome options', body);
+  openSheet('Metronome practice tools', body, { wide: true });
 }
 
 function openPresetManager(render: () => void) {
@@ -168,7 +219,7 @@ export function mountMetronome(root: HTMLElement) {
       else render();
     },
   });
-  const markingEl = h('div', { class: 'bpm-marking' });
+  const markingEl = h('button', { class: 'bpm-marking', onclick: openTempoSheet, 'aria-label': 'Tempo names and quick jumps' });
   const tempoDial = dial({
     min: MIN_BPM,
     max: MAX_BPM,
@@ -192,7 +243,8 @@ export function mountMetronome(root: HTMLElement) {
   const playBtn = h('button', { class: 'play-btn', 'aria-label': 'Start metronome', onclick: () => toggle() }, icon('play', 34));
   const tapBtn = h('button', { class: 'round-btn labeled', onclick: () => tap(), 'aria-label': 'Tap tempo (T)' }, icon('tap', 22), h('span', null, 'Tap'));
   const meterBtn = h('button', { class: 'meter-btn', onclick: openMeterSheet, 'aria-label': 'Time signature' });
-  const trainerBadge = h('div', { class: 'trainer-badge' });
+  const trainerBadge = h('div', { class: 'mode-badges' });
+  const countInLabel = h('div', { class: 'count-in-label', 'aria-live': 'polite' });
 
   const subSeg = segmented(SUBDIVISIONS, String(getSettings().metronome.subdivision), (v) => setMetronome({ subdivision: Number(v) }), 'Subdivision');
   const visualSeg = segmented(
@@ -315,11 +367,21 @@ export function mountMetronome(root: HTMLElement) {
     playBtn.replaceChildren(icon(metronome.playing ? 'stop' : 'play', 34));
     playBtn.setAttribute('aria-label', metronome.playing ? 'Stop metronome' : 'Start metronome');
     view.classList.toggle('playing', metronome.playing);
-    trainerBadge.hidden = m.trainerBars <= 0;
-    trainerBadge.replaceChildren(icon('bolt', 14), `+${m.trainerStep} every ${m.trainerBars} bars → ${m.trainerMax}`);
+    const badges: HTMLElement[] = [];
+    const badge = (name: Parameters<typeof icon>[0], text: string) => h('button', { class: 'mode-badge', onclick: openMetronomeOptions }, icon(name, 14), text);
+    if (m.countInBars > 0) badges.push(badge('flag', `${m.countInBars}-bar count-in`));
+    if (m.poly > 0) badges.push(badge('pulse', `${m.poly} against ${m.beatsPerBar}`));
+    if (m.muteBars > 0 && m.playBars > 0) badges.push(badge('sustain', `${m.playBars} on, ${m.muteBars} silent`));
+    if (m.randomMute > 0) badges.push(badge('sparkle', `${m.randomMute}% random silence`));
+    if (m.trainerBars > 0) badges.push(badge('bolt', `+${m.trainerStep} every ${m.trainerBars} bars → ${m.trainerMax}`));
+    if (m.stopAfterBars > 0) badges.push(badge('stop', `Stops after ${m.stopAfterBars} bars`));
+    trainerBadge.replaceChildren(...badges);
+    trainerBadge.hidden = badges.length === 0;
     renderPresets();
     if (!metronome.playing) {
-      beatsRow.querySelectorAll('.beat-block').forEach((b) => b.classList.remove('hit', 'sub-hit'));
+      view.classList.remove('counting');
+      countInLabel.textContent = '';
+      beatsRow.querySelectorAll('.beat-block').forEach((b) => b.classList.remove('hit', 'ghost'));
       pendulum.style.setProperty('--swing', '0deg');
     }
   }
@@ -329,10 +391,13 @@ export function mountMetronome(root: HTMLElement) {
     const m = getSettings().metronome;
     const block = beatsRow.children[e.beat] as HTMLElement | undefined;
     if (e.sub === 0) {
-      beatsRow.querySelectorAll('.beat-block.hit').forEach((b) => b.classList.remove('hit'));
+      view.classList.toggle('counting', e.countIn);
+      countInLabel.textContent = e.countIn ? `Count-in · ${e.beat + 1}` : e.muted ? 'silent' : '';
+      beatsRow.querySelectorAll('.beat-block.hit').forEach((b) => b.classList.remove('hit', 'ghost'));
       if (block) {
         void block.offsetWidth;
         block.classList.add('hit');
+        block.classList.toggle('ghost', !!e.muted);
       }
       // Pendulum reaches the far side exactly on the next beat.
       swingSide = -swingSide;
@@ -363,7 +428,7 @@ export function mountMetronome(root: HTMLElement) {
     h('div', { class: 'toolbar' }, meterBtn, h('div', { class: 'toolbar-mid' }, subSeg), h('div', { class: 'toolbar-end' }, iconButton('gear', 'Metronome options', openMetronomeOptions))),
     h('div', { class: 'tempo-row' }, minus, tempoDial, plus),
     trainerBadge,
-    visuals,
+    h('div', { class: 'visual-wrap' }, countInLabel, visuals),
     h('div', { class: 'transport' }, tapBtn, playBtn, h('div', { class: 'volume-wrap' }, icon('sound', 18), volume)),
     h('div', { class: 'subtle-row' }, visualSeg),
     presetsRow,

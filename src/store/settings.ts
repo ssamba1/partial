@@ -1,4 +1,5 @@
-import type { Temperament } from '../core/notes';
+import type { Tendencies } from '../core/intonation';
+import { setNotation, type Notation, type Temperament } from '../core/notes';
 import { dayKey } from '../core/practice';
 import type { AccentLevel, ClickTrack } from '../core/rhythm';
 import type { Damping } from '../audio/pitchTracker';
@@ -30,7 +31,12 @@ export interface Settings {
   /** Mic gate as RMS. */
   sensitivity: number;
   damping: Damping;
-  tunerDisplay: 'ring' | 'bar';
+  tunerDisplay: 'ring' | 'bar' | 'strobe';
+  notation: Notation;
+  /** Sound the reference drone for the note you are holding. */
+  followDrone: boolean;
+  /** All-time intonation statistics per written pitch class. */
+  tendencies: Tendencies;
   tunerMode: 'chromatic' | 'strings';
   stringInstrument: string;
   pureFifths: boolean;
@@ -47,6 +53,12 @@ export interface Settings {
     trainerBars: number;
     trainerStep: number;
     trainerMax: number;
+    countInBars: number;
+    poly: number;
+    playBars: number;
+    muteBars: number;
+    randomMute: number;
+    stopAfterBars: number;
     visual: BeatVisual;
     flashScreen: boolean;
   };
@@ -80,6 +92,9 @@ export const DEFAULT_SETTINGS: Settings = {
   sensitivity: 0.008,
   damping: 'normal',
   tunerDisplay: 'ring',
+  notation: 'english',
+  followDrone: false,
+  tendencies: {},
   tunerMode: 'chromatic',
   stringInstrument: 'guitar',
   pureFifths: true,
@@ -95,6 +110,12 @@ export const DEFAULT_SETTINGS: Settings = {
     trainerBars: 0,
     trainerStep: 2,
     trainerMax: 160,
+    countInBars: 0,
+    poly: 0,
+    playBars: 0,
+    muteBars: 0,
+    randomMute: 0,
+    stopAfterBars: 0,
     visual: 'blocks',
     flashScreen: false,
   },
@@ -136,6 +157,7 @@ function load(): Settings {
 }
 
 let current = load();
+setNotation(current.notation);
 const listeners = new Set<(s: Settings) => void>();
 
 export function getSettings(): Settings {
@@ -145,6 +167,8 @@ export function getSettings(): Settings {
 export function updateSettings(patch: Partial<Settings> | ((s: Settings) => Partial<Settings>)): Settings {
   const p = typeof patch === 'function' ? patch(current) : patch;
   current = { ...current, ...p };
+  // Note names are read synchronously all over the UI, so update the naming system before notifying.
+  setNotation(current.notation);
   try {
     localStorage.setItem(KEY, JSON.stringify(current));
   } catch {

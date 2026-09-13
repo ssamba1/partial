@@ -2,7 +2,7 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { uid } from '../../core/format';
 import { formatCents } from '../../core/format';
-import { noteName } from '../../core/notes';
+import { noteName, prettyName } from '../../core/notes';
 import { db, type ScoreEntry } from '../../store/db';
 import { getSettings } from '../../store/settings';
 import { errorBox, h } from '../dom';
@@ -173,7 +173,7 @@ export function mountSheetMusic(root: HTMLElement) {
     if (!doc) return;
     const token = ++renderToken;
     const count = twoUp ? Math.min(2, doc.numPages - page + 1) : 1;
-    pageLabel.textContent = count === 2 ? `${page}–${page + 1} / ${doc.numPages}` : `${page} / ${doc.numPages}`;
+    pageLabel.textContent = count === 2 ? `${page}-${page + 1} / ${doc.numPages}` : `${page} / ${doc.numPages}`;
     const available = pagesEl.clientWidth || window.innerWidth - 32;
     const maxHeight = (document.fullscreenElement ? window.innerHeight - 60 : window.innerHeight - 140);
     const canvases: HTMLCanvasElement[] = [];
@@ -221,11 +221,11 @@ export function mountSheetMusic(root: HTMLElement) {
   const offFrame = tracker.onFrame((f) => {
     const s = getSettings();
     if (!f.note) {
-      tunerEl.textContent = '–';
+      tunerEl.textContent = '·';
       tunerEl.className = 'mini-tuner';
       return;
     }
-    tunerEl.textContent = `${noteName(f.note.midi, s.flats)} ${formatCents(f.note.cents)}`;
+    tunerEl.textContent = `${prettyName(noteName(f.note.midi, s.flats))} ${formatCents(f.note.cents)}`;
     tunerEl.className = `mini-tuner ${Math.abs(f.note.cents) <= s.tolerance ? 'good' : 'off'}`;
   });
 

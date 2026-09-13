@@ -33,6 +33,7 @@ const PATHS = {
   strings: '<path d="M6 3v18M10 3v18M14 3v18M18 3v18"/><path d="M4 8h16" opacity=".5"/>',
   ring: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 7.8 4.5" stroke-width="3"/>',
   bar: '<path d="M3 12h18"/><path d="M12 7v10" stroke-width="3"/>',
+  strobe: '<path d="M4 5h3M10 5h3M16 5h3M3 12h2M8 12h2M13 12h2M18 12h2M5 19h4M13 19h4"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5h.01"/>',

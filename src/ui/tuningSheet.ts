@@ -1,4 +1,4 @@
-import { NOTE_NAMES_SHARP, TEMPERAMENTS, TRANSPOSITIONS } from '../core/notes';
+import { NOTATIONS, noteName, prettyName, TEMPERAMENTS, TRANSPOSITIONS, type Notation } from '../core/notes';
 import { getSettings, updateSettings } from '../store/settings';
 import { holdButton, openSheet, segmented } from './components';
 import { field, h, select } from './dom';
@@ -8,7 +8,7 @@ export function tuningSummary(): string {
   const s = getSettings();
   const t = TEMPERAMENTS.find((x) => x.id === s.temperament)!;
   const key = s.transposition === 'C' ? '' : ` · ${s.transposition.replace('b', '♭')}`;
-  const temperament = s.temperament === 'equal' ? 'Equal' : `${t.label.split(' ')[0]} in ${NOTE_NAMES_SHARP[s.tonic]}`;
+  const temperament = s.temperament === 'equal' ? 'Equal' : `${t.label.split(' (')[0]} in ${prettyName(noteName(s.tonic, s.flats, false))}`;
   return `A${'₄'} ${s.a4 % 1 ? s.a4.toFixed(1) : s.a4} · ${temperament}${key}`;
 }
 
@@ -54,20 +54,30 @@ export function openTuningSheet(): void {
       'div',
       { class: 'grid two' },
       field('Temperament', select(TEMPERAMENTS.map((t) => ({ value: t.id, label: t.label })), s.temperament, (v) => updateSettings({ temperament: v as typeof s.temperament }))),
-      field('Key (tonic)', select(NOTE_NAMES_SHARP.map((n, i) => ({ value: i, label: n })), s.tonic, (v) => updateSettings({ tonic: Number(v) }))),
+      field('Key (tonic)', select(Array.from({ length: 12 }, (_, i) => ({ value: i, label: prettyName(noteName(i, s.flats, false)) })), s.tonic, (v) => updateSettings({ tonic: Number(v) }))),
     ),
     h(
       'div',
-      { class: 'field' },
-      h('span', { class: 'field-label' }, 'Note names'),
-      segmented(
-        [
-          { value: 'sharp', label: 'C♯ D♯' },
-          { value: 'flat', label: 'D♭ E♭' },
-        ],
-        s.flats ? 'flat' : 'sharp',
-        (v) => updateSettings({ flats: v === 'flat' }),
-        'Note names',
+      { class: 'grid two' },
+      h(
+        'div',
+        { class: 'field' },
+        h('span', { class: 'field-label' }, 'Note names'),
+        segmented(NOTATIONS.map((n) => ({ value: n.id, label: n.label })), s.notation, (v) => updateSettings({ notation: v as Notation }), 'Note naming system'),
+      ),
+      h(
+        'div',
+        { class: 'field' },
+        h('span', { class: 'field-label' }, 'Accidentals'),
+        segmented(
+          [
+            { value: 'sharp', label: '♯ sharps' },
+            { value: 'flat', label: '♭ flats' },
+          ],
+          s.flats ? 'flat' : 'sharp',
+          (v) => updateSettings({ flats: v === 'flat' }),
+          'Accidentals',
+        ),
       ),
     ),
   );
