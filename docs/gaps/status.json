@@ -1311,61 +1311,71 @@
   "id": "02-11",
   "file": "gaps/02-metronome.md",
   "title": "The tuner's click-time buffer overflows with poly and subdivisions",
-  "status": "open"
+  "status": "fixed",
+  "note": "ClickLog keeps clicks sorted and pruned by time; registerClick in shared.ts is also called by click tracks and the exercise player. Unit tested with 40 clicks."
  },
  {
   "id": "02-12",
   "file": "gaps/02-metronome.md",
   "title": "Two timing engines can play at once",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: claimTransport/releaseTransport in shared.ts used by metronome, click tracks and exercise player; no e2e check added."
  },
  {
   "id": "02-13",
   "file": "gaps/02-metronome.md",
   "title": "The exercise player ignores a running metronome's phase",
-  "status": "open"
+  "status": "fixed",
+  "note": "metronome.nextBarTime(); the exercise player starts on the next bar at the same tempo, without its own count-in or click."
  },
  {
   "id": "02-14",
   "file": "gaps/02-metronome.md",
   "title": "The first click can be swallowed when the audio device wakes up",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: start delay is max(0.08, outputLatency + 0.05) with a silent 100 ms warm-up source; not tested on Bluetooth hardware."
  },
  {
   "id": "02-15",
   "file": "gaps/02-metronome.md",
   "title": "iPhone ring/silent switch may mute Web Audio",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: sets navigator.audioSession.type to playback where present, else a one-time iOS tip; needs a test on an iPhone with the silent switch on."
  },
  {
   "id": "02-16",
   "file": "gaps/02-metronome.md",
   "title": "No limiter on the master output",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: DynamicsCompressor limiter (-3 dB, ratio 20, 1 ms attack) on the master; the offline worst-case peak render was not done, and a compressor is not a brickwall."
  },
  {
   "id": "02-17",
   "file": "gaps/02-metronome.md",
   "title": "Every click builds 2 to 5 audio nodes on the fly",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: each sound and level is pre-rendered into cached AudioBuffers and played with one source and one gain; the -60 dB match test and profiling were not done."
  },
  {
   "id": "02-18",
   "file": "gaps/02-metronome.md",
   "title": "Loudness matching uses peak level, not perceived loudness",
-  "status": "open"
+  "status": "fixed",
+  "note": "Sounds are matched at runtime on the RMS of the rendered clicks against the woodblock (RMS, not K-weighted)."
  },
  {
   "id": "02-19",
   "file": "gaps/02-metronome.md",
   "title": "Accents are weak on unpitched sounds",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: brighter filters and extra transient layers on accents for unpitched sounds, and an accent strength setting 0 to 12 dB; only the gain math is unit tested, not a rendered level."
  },
  {
   "id": "02-20",
   "file": "gaps/02-metronome.md",
   "title": "Long-decay sounds smear together at fast tempos",
-  "status": "open"
+  "status": "fixed",
+  "note": "Each click gets the gap to the next click in its layer and is cut at 80% of it."
  },
  {
   "id": "02-21",
