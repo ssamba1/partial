@@ -3,7 +3,7 @@ import { h } from './dom';
 import { icon, type IconName } from './icons';
 
 /** Short vibration on devices that support it, only after the user has interacted (browsers block it otherwise). */
-export function haptic(ms: number): void {
+export function haptic(ms: number | number[]): void {
   const activation = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
   if (activation && !activation.hasBeenActive) return;
   navigator.vibrate?.(ms);

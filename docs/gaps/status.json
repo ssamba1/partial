@@ -1031,61 +1031,71 @@
   "id": "01-81",
   "file": "gaps/01-tuner.md",
   "title": "No Scala import or wider historical temperament library",
-  "status": "open"
+  "status": "fixed",
+  "note": "Scala .scl import as a 12-note temperament (parser tested against the format spec), plus Kirnberger III, 1/6-comma meantone, Kellner and Neidhardt I from the Scala archive; partial: scales other than 12 notes per octave import only as a message"
  },
  {
   "id": "01-82",
   "file": "gaps/01-tuner.md",
   "title": "No tuning systems with other than 12 notes",
-  "status": "open"
+  "status": "fixed",
+  "note": "Notes per octave setting (12, 19, 24, 31) for the chromatic tuner with chain-of-fifths names and a ring with that many notes; partial: 53 and other divisions not offered"
  },
  {
   "id": "01-83",
   "file": "gaps/01-tuner.md",
   "title": "No maqam or makam accidentals",
-  "status": "open"
+  "status": "fixed",
+  "note": "Quarter-tone sharp and flat signs (Unicode U+1D132, U+1D133) name the in-between steps of 24 and 31 equal; partial: maqam and makam scale presets need verified sources or musicians"
  },
  {
   "id": "01-84",
   "file": "gaps/01-tuner.md",
   "title": "Tonic cannot be set as a frequency for Indian music",
-  "status": "open"
+  "status": "fixed",
+  "note": "Sa mode: Sa set in Hz (or from the last note), targets are the 22 shrutis from Thakur (Resonance 2015); partial: no single verified 12-svara komal and tivra ratio set, so those show as shruti labels"
  },
  {
   "id": "01-85",
   "file": "gaps/01-tuner.md",
   "title": "Cannot tune to an existing instrument's own scale",
-  "status": "open"
+  "status": "fixed",
+  "note": "My scale mode tunes to notes captured from an instrument (median over 1.5 s), in any octave, managed in Tools"
  },
  {
   "id": "01-86",
   "file": "gaps/01-tuner.md",
   "title": "Transposition list has wrong octaves and gaps",
-  "status": "open"
+  "status": "fixed",
+  "note": "Transpositions now keep the octave (tenor sax +14, baritone +21, piccolo -12, and more) with cited sources; unknown stored ids fall back to concert"
  },
  {
   "id": "01-87",
   "file": "gaps/01-tuner.md",
   "title": "Written and concert pitch cannot be shown together",
-  "status": "open"
+  "status": "fixed",
+  "note": "A 'concert B♭3' line shows next to the written note for transposing instruments (e2e check)"
  },
  {
   "id": "01-88",
   "file": "gaps/01-tuner.md",
   "title": "Spelling ignores the key",
-  "status": "open"
+  "status": "fixed",
+  "note": "Accidentals setting sharps, flats or by key (flat major keys F to G♭), using the written key note"
  },
  {
   "id": "01-89",
   "file": "gaps/01-tuner.md",
   "title": "German and solfège naming are incomplete",
-  "status": "open"
+  "status": "fixed",
+  "note": "German Cis/Des/Es/As/B/H, Italian Do Re Mi, chromatic movable do from the key, and Helmholtz octave names"
  },
  {
   "id": "01-90",
   "file": "gaps/01-tuner.md",
   "title": "No note lock or arbitrary target",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tap a ring note to lock the tuner to it (hold to hear it), or type a frequency; far readings show '-3 st +12¢'; Auto chip unlocks"
  },
  {
   "id": "01-91",

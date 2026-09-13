@@ -1,4 +1,6 @@
-import { a4Cents, A4_MAX, A4_MIN, clampA4, concertToWrittenPc, isWellTemperament, JUST_ALTERNATIVES, NOTATIONS, noteName, prettyName, TEMPERAMENTS, TRANSPOSITIONS, writtenToConcertPc, type Notation, type Temperament } from '../core/notes';
+import { a4Cents, A4_MAX, A4_MIN, clampA4, concertToWrittenPc, isWellTemperament, JUST_ALTERNATIVES, NOTATIONS, noteName, prettyName, TEMPERAMENTS, TRANSPOSITIONS, transpositionShort, writtenToConcertPc, type Notation, type OctaveStyle, type Spelling, type Temperament } from '../core/notes';
+import { EDOS, parseScala, scalaToTwelve } from '../core/scales';
+import { temperamentBeats } from '../core/tuningtools';
 import { uid } from '../core/format';
 import { signedCents } from '../core/display';
 import { getSettings, sanitizeTuningPreset, subscribeSettings, tuningOf, updateSettings, type Settings } from '../store/settings';
@@ -9,10 +11,12 @@ import { icon } from './icons';
 export function tuningSummary(): string {
   const s = getSettings();
   const t = TEMPERAMENTS.find((x) => x.id === s.temperament)!;
-  const key = s.transposition === 'C' ? '' : ` · ${s.transposition.replace('b', '♭')}`;
+  const short = transpositionShort(s.transposition);
+  const key = short ? ` · ${short}` : '';
   const tonic = tuningOf(s).tonic;
   const follows = s.tonicFollowsDrone && s.temperament !== 'equal' ? ' (drone)' : '';
-  const temperament = s.temperament === 'equal' ? 'Equal' : `${t.label.split(' (')[0]} ${isWellTemperament(s.temperament) ? 'from' : 'in'} ${prettyName(noteName(tonic, s.flats, false))}${follows}`;
+  if (s.edo !== 12) return `A${'₄'} ${s.a4 % 1 ? s.a4.toFixed(1) : s.a4} · ${s.edo} equal${key}`;
+  const temperament = s.temperament === 'equal' ? 'Equal' : s.temperament === 'custom' ? (s.customScale?.name.slice(0, 24) ?? 'Imported') + ` in ${prettyName(noteName(tonic, s.flats, false))}` : `${t.label.split(' (')[0]} ${isWellTemperament(s.temperament) ? 'from' : 'in'} ${prettyName(noteName(tonic, s.flats, false))}${follows}`;
   return `A${'₄'} ${s.a4 % 1 ? s.a4.toFixed(1) : s.a4} · ${temperament}${key}`;
 }
 
@@ -56,12 +60,34 @@ export function openTuningSheet(): void {
     const cur = getSettings();
     updateSettings({ tonic: writtenToConcertPc(Number(v), semitonesOf(cur)) });
   });
-  const temperamentSelect = select(TEMPERAMENTS.map((t) => ({ value: t.id, label: t.label })), s.temperament, (v) => {
+  const temperamentOptions = (cur: Settings) => TEMPERAMENTS.filter((t) => t.id !== 'custom' || cur.customScale).map((t) => ({ value: t.id, label: t.id === 'custom' ? `Imported: ${cur.customScale!.name.slice(0, 30)}` : t.label }));
+  const temperamentSelect = select(temperamentOptions(s), s.temperament, (v) => {
     const t = v as Temperament;
     // Well temperaments are written from C, so start them there.
     updateSettings(isWellTemperament(t) ? { temperament: t, tonic: 0 } : { temperament: t });
   });
   const presetChips = h('div', { class: 'chips' });
+  const scalaNote = h('small', { class: 'muted' });
+  const scalaInput = h('input', { type: 'file', accept: '.scl,text/plain', class: 'visually-hidden', 'aria-label': 'Scala file' });
+  scalaInput.addEventListener('change', async () => {
+    const file = scalaInput.files?.[0];
+    scalaInput.value = '';
+    if (!file) return;
+    const parsed = parseScala(await file.text());
+    if (typeof parsed === 'string') {
+      scalaNote.textContent = parsed;
+      return;
+    }
+    const cents = scalaToTwelve(parsed);
+    if (!cents) {
+      scalaNote.textContent = `${parsed.cents.length} notes: only 12-note scales that repeat at the octave can be a temperament.`;
+      return;
+    }
+    scalaNote.textContent = '';
+    updateSettings({ customScale: { name: parsed.description || file.name.replace(/\.scl$/i, ''), cents }, temperament: 'custom' });
+  });
+  const scalaBtn = h('button', { class: 'chip', onclick: () => scalaInput.click() }, 'Import Scala file');
+  const edoSelect = select(EDOS.map((n) => ({ value: n, label: n === 12 ? '12 (normal)' : `${n} equal` })), s.edo, (v) => updateSettings({ edo: Number(v) }), { 'aria-label': 'Notes per octave' });
   const presetName = h('input', { type: 'text', maxlength: 40, placeholder: 'Name, e.g. Baroque 415', 'aria-label': 'Preset name' });
 
   function render() {
@@ -69,6 +95,7 @@ export function openTuningSheet(): void {
     const semis = semitonesOf(cur);
     if (document.activeElement !== a4Input) a4Input.value = cur.a4.toFixed(1);
     a4CentsEl.textContent = cur.a4 === 440 ? '' : `${cur.a4 % 1 ? cur.a4.toFixed(1) : cur.a4} Hz = ${signedCents(a4Cents(cur.a4), true)} from 440`;
+    temperamentSelect.replaceChildren(...temperamentOptions(cur).map((o) => h('option', { value: o.value }, o.label)));
     temperamentSelect.value = cur.temperament;
 
     const well = isWellTemperament(cur.temperament);
@@ -77,7 +104,8 @@ export function openTuningSheet(): void {
     tonicHint.hidden = !tonicHint.textContent;
     tonicSelect.replaceChildren(...Array.from({ length: 12 }, (_, i) => h('option', { value: String(i) }, prettyName(noteName(i, cur.flats, false)))));
     tonicSelect.value = String(concertToWrittenPc(cur.tonic, semis));
-    tonicSelect.disabled = cur.temperament === 'equal' || cur.tonicFollowsDrone;
+    // The key also sets spelling by key and movable do, so it stays available for those in equal temperament.
+    tonicSelect.disabled = (cur.temperament === 'equal' && cur.spelling !== 'key' && cur.notation !== 'movable') || cur.tonicFollowsDrone;
 
     extra.replaceChildren(...temperamentExtras(cur));
     presetChips.replaceChildren(
@@ -137,6 +165,24 @@ export function openTuningSheet(): void {
         ),
       );
     }
+    if (cur.temperament !== 'equal') {
+      // Beat rates of thirds, fourths and fifths from F3 to F4, for setting the temperament by ear.
+      const rows = temperamentBeats(tuningOf(cur), 53, 65).filter((b) => b.name === 'fifth' || b.name === 'major third');
+      out.push(
+        h(
+          'details',
+          { class: 'beat-list' },
+          h('summary', null, 'Beat rates F3 to F4'),
+          h('small', null, 'Beats per second between the partials the two notes share. Positive means the interval is wide.'),
+          h(
+            'table',
+            { class: 'data-table' },
+            h('tr', null, h('th', null, 'Interval'), h('th', null, 'Beats/s')),
+            ...rows.map((b) => h('tr', null, h('td', null, `${prettyName(noteName(b.lower, cur.flats))} to ${prettyName(noteName(b.upper, cur.flats))} ${b.name}`), h('td', null, b.beats.toFixed(2)))),
+          ),
+        ),
+      );
+    }
     if (cur.temperament === 'meantone') {
       // Each chain has 12 notes; the wolf fifth sits between its last and first note.
       const options = Array.from({ length: 12 }, (_, flats) => {
@@ -192,7 +238,9 @@ export function openTuningSheet(): void {
       'Notes are shown as written for your instrument.',
     ),
     h('div', { class: 'grid two' }, field('Temperament', temperamentSelect), h('label', { class: 'field' }, tonicLabel, tonicSelect, tonicHint)),
+    h('div', { class: 'row wrap tight' }, scalaBtn, scalaInput, scalaNote),
     extra,
+    field('Notes per octave', edoSelect, 'For the chromatic tuner. With more than 12, the temperament is not used.'),
     h(
       'div',
       { class: 'grid two' },
@@ -200,7 +248,8 @@ export function openTuningSheet(): void {
         'div',
         { class: 'field' },
         h('span', { class: 'field-label' }, 'Note names'),
-        segmented(NOTATIONS.map((n) => ({ value: n.id, label: n.label })), s.notation, (v) => updateSettings({ notation: v as Notation }), 'Note naming system'),
+        select(NOTATIONS.map((n) => ({ value: n.id, label: n.label })), s.notation, (v) => updateSettings({ notation: v as Notation }), { 'aria-label': 'Note naming system' }),
+        h('small', null, 'Movable do names notes from the key.'),
       ),
       h(
         'div',
@@ -208,13 +257,28 @@ export function openTuningSheet(): void {
         h('span', { class: 'field-label' }, 'Accidentals'),
         segmented(
           [
-            { value: 'sharp', label: '♯ sharps' },
-            { value: 'flat', label: '♭ flats' },
+            { value: 'sharps', label: '♯ sharps' },
+            { value: 'flats', label: '♭ flats' },
+            { value: 'key', label: 'By key' },
           ],
-          s.flats ? 'flat' : 'sharp',
-          (v) => updateSettings({ flats: v === 'flat' }),
+          s.spelling,
+          (v) => updateSettings({ spelling: v as Spelling }),
           'Accidentals',
         ),
+      ),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h('span', { class: 'field-label' }, 'Octaves'),
+      segmented(
+        [
+          { value: 'scientific', label: 'C4' },
+          { value: 'helmholtz', label: 'c′' },
+        ],
+        s.octaveStyle,
+        (v) => updateSettings({ octaveStyle: v as OctaveStyle }),
+        'Octave names',
       ),
     ),
   );
@@ -222,7 +286,8 @@ export function openTuningSheet(): void {
   // Re-render only when something the sheet shows has changed.
   let extrasKey = '';
   const off = subscribeSettings((cur) => {
-    const key = `${cur.temperament}|${cur.flats}|${cur.notation}|${cur.temperamentAnchor}|${cur.tonicFollowsDrone}|${JSON.stringify(cur.justRatios)}|${cur.meantoneFlats}|${cur.transposition}|${cur.tonic}|${cur.a4}|${cur.tuningPresets.length}`;
+    edoSelect.value = String(cur.edo);
+    const key = `${cur.edo}|${cur.spelling}|${cur.customScale?.name}|${cur.temperament}|${cur.flats}|${cur.notation}|${cur.temperamentAnchor}|${cur.tonicFollowsDrone}|${JSON.stringify(cur.justRatios)}|${cur.meantoneFlats}|${cur.transposition}|${cur.tonic}|${cur.a4}|${cur.tuningPresets.length}`;
     if (key === extrasKey) return;
     extrasKey = key;
     render();

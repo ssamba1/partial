@@ -1,27 +1,59 @@
 export const NOTE_NAMES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
 export const NOTE_NAMES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
 
-export type Temperament = 'equal' | 'just' | 'pythagorean' | 'meantone' | 'werckmeister3' | 'vallotti' | 'young2';
+export type Temperament = 'equal' | 'just' | 'pythagorean' | 'meantone' | 'meantone6' | 'werckmeister3' | 'vallotti' | 'young2' | 'kirnberger3' | 'kellner' | 'neidhardt1' | 'custom';
 
 export const TEMPERAMENTS: { id: Temperament; label: string }[] = [
   { id: 'equal', label: 'Equal' },
   { id: 'just', label: 'Just (5-limit)' },
   { id: 'pythagorean', label: 'Pythagorean' },
   { id: 'meantone', label: 'Meantone (1/4 comma)' },
+  { id: 'meantone6', label: 'Meantone (1/6 comma)' },
   { id: 'werckmeister3', label: 'Werckmeister III' },
   { id: 'vallotti', label: 'Vallotti' },
   { id: 'young2', label: 'Young II' },
+  { id: 'kirnberger3', label: 'Kirnberger III' },
+  { id: 'kellner', label: 'Kellner' },
+  { id: 'neidhardt1', label: 'Neidhardt I' },
+  { id: 'custom', label: 'Imported scale' },
 ];
 
-/** Transposing instruments: semitones added to concert pitch to get the written pitch. */
+/**
+ * Transposing instruments: semitones added to concert pitch to get the written pitch.
+ * Sources for each interval, sounding relative to written:
+ * saxophones: https://scholar.colorado.edu/downloads/w37637823 (soprano M2, alto M6, tenor M9, baritone octave plus M6 lower);
+ * clarinets in Bb, A and Eb: https://www.vsl.co.at/academy/woodwinds/clarinet ;
+ * bass clarinet (treble clef): https://www.vsl.co.at/academy/woodwinds/bass-clarinet ;
+ * trumpets in Bb and D: https://www.vsl.co.at/academy/brass/trumpet-c ; Eb trumpet: https://www.paulmorellimusic.com/writing-for-the-trumpet.html ;
+ * horn in F: https://www.vsl.co.at/academy/brass/horn-f ; English horn: https://www.vsl.co.at/academy/woodwinds/english-horn ;
+ * alto flute: https://www.andrewhugill.com/OrchestraManual/flutes.html ; piccolo: https://www.vsl.co.at/academy/woodwinds/piccolo ;
+ * double bass: https://www.vsl.co.at/academy/strings/double-bass ; contrabassoon: https://www.vsl.co.at/academy/woodwinds/contrabassoon ;
+ * glockenspiel: https://www.vsl.co.at/academy/percussion/glockenspiel ;
+ * euphonium in treble clef: https://pressbooks.palni.org/brasstechniquesandpedagogy/chapter/the-euphonium/
+ * Ids already in use are kept so saved presets still load.
+ */
 export const TRANSPOSITIONS: { id: string; label: string; semitones: number }[] = [
   { id: 'C', label: 'Concert (C)', semitones: 0 },
-  { id: 'Bb', label: 'B♭ (clarinet, trumpet, tenor sax)', semitones: 2 },
-  { id: 'Eb', label: 'E♭ (alto sax, E♭ clarinet)', semitones: 9 },
+  { id: 'Bb', label: 'B♭ (clarinet, trumpet, soprano sax)', semitones: 2 },
+  { id: 'Bb9', label: 'B♭ low (tenor sax, bass clarinet, treble clef euphonium)', semitones: 14 },
+  { id: 'A', label: 'A (clarinet in A)', semitones: 3 },
+  { id: 'Eb', label: 'E♭ (alto sax)', semitones: 9 },
+  { id: 'Eb13', label: 'E♭ low (baritone sax)', semitones: 21 },
+  { id: 'EbHigh', label: 'E♭ high (E♭ clarinet, E♭ trumpet)', semitones: -3 },
+  { id: 'D', label: 'D (D trumpet)', semitones: -2 },
   { id: 'F', label: 'F (horn, English horn)', semitones: 7 },
   { id: 'G', label: 'G (alto flute)', semitones: 5 },
-  { id: 'A', label: 'A (clarinet in A)', semitones: 3 },
+  { id: 'C8va', label: 'Octave up (piccolo)', semitones: -12 },
+  { id: 'C8vb', label: 'Octave down (double bass, contrabassoon)', semitones: 12 },
+  { id: 'C15ma', label: 'Two octaves up (glockenspiel)', semitones: -24 },
 ];
+
+/** Short label for a transposition, such as "B♭ low", or '' for concert pitch. */
+export function transpositionShort(id: string): string {
+  const t = TRANSPOSITIONS.find((x) => x.id === id);
+  if (!t || t.id === 'C') return '';
+  return t.label.split(' (')[0];
+}
 
 export function mod(n: number, m: number): number {
   return ((n % m) + m) % m;
@@ -131,7 +163,22 @@ export const WELL_TEMPERING: Record<'werckmeister3' | 'vallotti' | 'young2', num
   young2: tempered([0, 1, 2, 3, 4, 5], 1 / 6),
 };
 
+/**
+ * Cents above C, from the Scala archive of the Huygens-Fokker Foundation,
+ * https://www.huygens-fokker.org/docs/scales.zip : kirnberger.scl ("Kirnberger III,
+ * letter to Forkel 1779"), meansixth.scl (1/6-comma meantone), kellner.scl
+ * ("Kellner's Bach tuning") and neidhardt1.scl ("Neidhardt I temperament (1724)").
+ */
+export const SCALA_TEMPERAMENTS: Record<'kirnberger3' | 'meantone6' | 'kellner' | 'neidhardt1', number[]> = {
+  kirnberger3: [0, 90.22, 193.16, 294.13, 386.31, 498.04, 590.22, 696.58, 792.18, 889.74, 996.09, 1088.27],
+  meantone6: [0, 88.59, 196.74, 304.89, 393.48, 501.63, 590.22, 698.37, 786.96, 895.11, 1003.26, 1091.85],
+  kellner: [0, 90.22, 194.53, 294.13, 389.05, 498.04, 588.27, 697.26, 792.18, 891.79, 996.09, 1091.01],
+  neidhardt1: [0, 94.14, 196.09, 296.09, 392.18, 498.04, 592.18, 698.04, 796.09, 894.13, 996.09, 1092.18],
+};
+
 const TEMPERAMENT_CENTS: Record<Temperament, number[]> = {
+  ...SCALA_TEMPERAMENTS,
+  custom: Array.from({ length: 12 }, (_, i) => i * 100),
   equal: Array.from({ length: 12 }, (_, i) => i * 100),
   just: JUST_RATIOS.map(ratioToCents),
   pythagorean: PYTHAGOREAN_RATIOS.map(ratioToCents),
@@ -147,11 +194,14 @@ export interface TemperamentOptions {
   justRatios?: Record<number, string>;
   /** Flats in the meantone chain (0 to 11). */
   meantoneFlats?: number;
+  /** Cents above the tonic of the 12 notes of an imported scale, for temperament 'custom'. */
+  customCents?: number[];
 }
 
 /** Deviation in cents from equal temperament of the pitch class `interval` semitones above the tonic. */
 export function temperamentOffset(temperament: Temperament, interval: number, opts: TemperamentOptions = {}): number {
   const i = mod(interval, 12);
+  if (temperament === 'custom') return opts.customCents?.length === 12 ? opts.customCents[i] - i * 100 : 0;
   if (temperament === 'just' && opts.justRatios && Object.keys(opts.justRatios).length) return justCents(opts.justRatios)[i] - i * 100;
   if (temperament === 'meantone' && opts.meantoneFlats !== undefined && opts.meantoneFlats !== DEFAULT_MEANTONE_FLATS) return meantoneCents(opts.meantoneFlats)[i] - i * 100;
   return TEMPERAMENT_CENTS[temperament][i] - i * 100;
@@ -159,7 +209,7 @@ export function temperamentOffset(temperament: Temperament, interval: number, op
 
 /** Well temperaments are defined from C; the others are built on the key's tonic. */
 export function isWellTemperament(t: Temperament): boolean {
-  return t === 'werckmeister3' || t === 'vallotti' || t === 'young2';
+  return t === 'werckmeister3' || t === 'vallotti' || t === 'young2' || t === 'kirnberger3' || t === 'kellner' || t === 'neidhardt1';
 }
 
 export interface TuningSystem extends TemperamentOptions {
@@ -277,42 +327,98 @@ export function readingForNote(frequency: number, midi: number, tuning: TuningSy
   };
 }
 
-export type Notation = 'english' | 'solfege' | 'german';
+export type Notation = 'english' | 'solfege' | 'italian' | 'movable' | 'german';
 
 export const NOTATIONS: { id: Notation; label: string }[] = [
   { id: 'english', label: 'C D E' },
   { id: 'solfege', label: 'Do Ré Mi' },
+  { id: 'italian', label: 'Do Re Mi' },
+  { id: 'movable', label: 'Movable do' },
   { id: 'german', label: 'C D H' },
 ];
 
 const SOLFEGE_SHARP = ['Do', 'Do#', 'Ré', 'Ré#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si'];
 const SOLFEGE_FLAT = ['Do', 'Réb', 'Ré', 'Mib', 'Mi', 'Fa', 'Solb', 'Sol', 'Lab', 'La', 'Sib', 'Si'];
-// German: B natural is H, B flat is B.
-const GERMAN_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'B', 'H'];
-const GERMAN_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'B', 'H'];
+// Italian: do re mi fa sol la si, https://it.wikipedia.org/wiki/Nota_musicale ; diesis and bemolle shown as the signs.
+const ITALIAN_SHARP = ['Do', 'Do#', 'Re', 'Re#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si'];
+const ITALIAN_FLAT = ['Do', 'Reb', 'Re', 'Mib', 'Mi', 'Fa', 'Solb', 'Sol', 'Lab', 'La', 'Sib', 'Si'];
+// German: -is raises, -es lowers, B natural is H and B flat is B, Es and As contracted.
+// https://de.wikipedia.org/wiki/Stammton
+const GERMAN_SHARP = ['C', 'Cis', 'D', 'Dis', 'E', 'F', 'Fis', 'G', 'Gis', 'A', 'Ais', 'H'];
+const GERMAN_FLAT = ['C', 'Des', 'D', 'Es', 'E', 'F', 'Ges', 'G', 'As', 'A', 'B', 'H'];
+// Chromatic movable do relative to the key note: https://en.wikipedia.org/wiki/Solf%C3%A8ge
+const MOVABLE_SHARP = ['Do', 'Di', 'Re', 'Ri', 'Mi', 'Fa', 'Fi', 'Sol', 'Si', 'La', 'Li', 'Ti'];
+const MOVABLE_FLAT = ['Do', 'Ra', 'Re', 'Me', 'Mi', 'Fa', 'Se', 'Sol', 'Le', 'La', 'Te', 'Ti'];
+
+export type OctaveStyle = 'scientific' | 'helmholtz';
 
 let currentNotation: Notation = 'english';
+let currentKey = 0;
+let currentOctaves: OctaveStyle = 'scientific';
 
-/** App-wide note naming system, set from settings. */
-export function setNotation(n: Notation): void {
+/** App-wide note naming, set from settings: the system, the written key note for movable do, and the octave style. */
+export function setNotation(n: Notation, key = currentKey, octaves: OctaveStyle = currentOctaves): void {
   currentNotation = n;
+  currentKey = mod(key, 12);
+  currentOctaves = octaves;
 }
 
-export function noteName(midi: number, flats = false, withOctave = true, notation: Notation = currentNotation): string {
-  const table =
-    notation === 'solfege'
-      ? flats
-        ? SOLFEGE_FLAT
-        : SOLFEGE_SHARP
-      : notation === 'german'
-        ? flats
-          ? GERMAN_FLAT
-          : GERMAN_SHARP
-        : flats
-          ? NOTE_NAMES_FLAT
-          : NOTE_NAMES_SHARP;
-  const name = table[mod(midi, 12)];
-  return withOctave ? `${name}${Math.floor(midi / 12) - 1}` : name;
+/**
+ * Helmholtz octave marks, from https://en.wikipedia.org/wiki/Helmholtz_pitch_notation :
+ * c′ is C4, c is C3, C is C2, C͵ is C1. Lower case from octave 3 up, one prime per octave above 3.
+ */
+export function helmholtz(name: string, octave: number): string {
+  if (octave >= 3) return name.charAt(0).toLowerCase() + name.slice(1) + '′'.repeat(octave - 3);
+  return name + '͵'.repeat(Math.max(0, 2 - octave));
+}
+
+function lettersInUse(notation: Notation): boolean {
+  return notation === 'english' || notation === 'german';
+}
+
+export function noteName(midi: number, flats = false, withOctave = true, notation: Notation = currentNotation, key = currentKey): string {
+  const pc = mod(midi, 12);
+  let name: string;
+  if (notation === 'movable') name = (flats ? MOVABLE_FLAT : MOVABLE_SHARP)[mod(pc - key, 12)];
+  else {
+    const table =
+      notation === 'solfege' ? (flats ? SOLFEGE_FLAT : SOLFEGE_SHARP)
+      : notation === 'italian' ? (flats ? ITALIAN_FLAT : ITALIAN_SHARP)
+      : notation === 'german' ? (flats ? GERMAN_FLAT : GERMAN_SHARP)
+      : flats ? NOTE_NAMES_FLAT : NOTE_NAMES_SHARP;
+    name = table[pc];
+  }
+  if (!withOctave) return name;
+  const octave = Math.floor(midi / 12) - 1;
+  if (currentOctaves === 'helmholtz' && lettersInUse(notation)) return helmholtz(name, octave);
+  return `${name}${octave}`;
+}
+
+/** Octave shown after a name written without one: "4", or Helmholtz marks when that style is on. */
+export function octaveText(midi: number): string {
+  const octave = Math.floor(midi / 12) - 1;
+  if (currentOctaves !== 'helmholtz' || !lettersInUse(currentNotation)) return String(octave);
+  return octave >= 3 ? '′'.repeat(octave - 3) : '͵'.repeat(Math.max(0, 2 - octave));
+}
+
+/** Name with the octave, as `noteName` gives it, from a name already made without one. */
+export function withOctave(name: string, midi: number): string {
+  const octave = Math.floor(midi / 12) - 1;
+  if (currentOctaves === 'helmholtz' && lettersInUse(currentNotation)) return helmholtz(name, octave);
+  return `${name}${octave}`;
+}
+
+/**
+ * Major keys written with flats: F, B♭, E♭, A♭, D♭, G♭ (C♭ shares a pitch class with B and is spelled with sharps here).
+ * https://en.wikipedia.org/wiki/Key_signature
+ */
+export const FLAT_KEYS = [5, 10, 3, 8, 1, 6];
+
+export type Spelling = 'sharps' | 'flats' | 'key';
+
+/** Whether to spell with flats, given the spelling choice and the written key note. */
+export function spellWithFlats(spelling: Spelling, writtenKey: number): boolean {
+  return spelling === 'flats' || (spelling === 'key' && FLAT_KEYS.includes(mod(writtenKey, 12)));
 }
 
 /** Pretty accidentals for display: C# -> C♯, Bb -> B♭ (never touches the German note B). */

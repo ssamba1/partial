@@ -4089,3 +4089,61 @@ canvas.take-chart {
     background: Highlight;
   }
 }
+
+/* ----- Tuner tools, lock and extra modes ----- */
+.lock-row {
+  justify-content: center;
+  margin: 6px 0;
+}
+.tendency-tip {
+  margin: 6px auto 0;
+  text-align: center;
+  font-size: 0.88rem;
+}
+.bell-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.bell-peak {
+  font-variant-numeric: tabular-nums;
+}
+.tool-card {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.tool-card > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.tool-card[open] > summary {
+  margin-bottom: 6px;
+}
+.tool-card > * + * {
+  margin-top: 8px;
+}
+.tool-result {
+  margin: 8px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.table-wrap {
+  overflow-x: auto;
+}
+.data-table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 3px 10px 3px 0;
+}
+.beat-list > summary {
+  cursor: pointer;
+}
+.pitch-ring.many-notes .note-label {
+  font-size: 9px;
+}

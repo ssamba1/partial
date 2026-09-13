@@ -1,7 +1,6 @@
 import { currentMicTrack, ensureRunning, getContext, getMaster, MicError } from '../../audio/context';
 import { VoicedClock } from '../../core/practice';
 import { nearestPartial, type PartialReading } from '../../core/partials';
-import { MIN_FREQUENCY } from '../../audio/pitchTracker';
 import { Drone, DRONE_TIMBRES, playTone, type DroneTimbre } from '../../audio/voices';
 import { playChime, playCue } from '../../audio/cues';
 import { agoText, AutoScale, barLabels, centsText, centsToPercent, centsToY, clampHoldSeconds, clampTolerance, clampTraceOffset, formatHz, scaleRange, signedCents, signedLabel, traceRuns, useDecimalCents, type DecimalCents, type TracePoint, type TunerScale } from '../../core/display';
@@ -16,9 +15,14 @@ import { targetFrequency, type TargetSpec } from '../../core/targets';
 import { addReading, bookTendencies, InTuneLatch, LongToneWatcher, mergeTendencies, StableNoteGate, summarize, tendencyKey, traceSummary, type HeldNote, type Tendencies } from '../../core/intonation';
 import { clearTendencies, getTendencyBook, saveTendencies } from '../../store/tendencies';
 import { calibratedThreshold, meterPosition, micHelpSteps, micWarnings, SignalStatus, zeroCrossingRate } from '../../core/mic';
-import { clampA4, midiToFrequency, noteName, pitchClassOffsets, prettyName, TRANSPOSITIONS, transpose, vsEqualCents } from '../../core/notes';
+import { clampA4, frequencyToNote, midiToFrequency, mod, noteName, octaveText, pitchClassOffsets, prettyName, TRANSPOSITIONS, transpose, vsEqualCents, withOctave, writtenToConcertPc } from '../../core/notes';
+import { bellPartial, edoNames, edoReading, lockOffset, nearestCaptured, nearestMidi, pitchClassMidiNear, SHRUTIS, shrutiName, svaraReading, HALF_FLAT, HALF_SHARP } from '../../core/scales';
+import { HapticCues, spectrumPeaks, StrikeWatcher, strikePitch, stretchCurve, type Peak } from '../../core/tuningtools';
+import { tipFor } from '../../core/tendencyref';
+import { openTunerTools } from '../tunerTools';
 import { clampAutoStop, getSettings, logPractice, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
 import { haptic, iconButton, openSheet, segmented } from '../components';
+import { MIN_FREQUENCY } from '../../audio/pitchTracker';
 import { cssVar, errorBox, fitCanvas, h, numberInput, select, setText } from '../dom';
 import { announce } from '../controls';
 import { createPitchRing } from '../pitchRing';
@@ -312,6 +316,12 @@ function openTunerOptions(tools: OptionsTools) {
     h(
       'label',
       { class: 'switch-row' },
+      h('span', null, h('strong', null, 'Vibration cues'), h('small', null, 'On phones that vibrate: two short pulses when sharp, one long pulse when flat, nothing when in tune.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: s.hapticCues, onchange: (e: Event) => updateSettings({ hapticCues: (e.target as HTMLInputElement).checked }) }),
+    ),
+    h(
+      'label',
+      { class: 'switch-row' },
       h('span', null, h('strong', null, 'Sound cues'), h('small', null, 'Ticks while you are out of tune: faster for bigger errors, rising when flat, falling when sharp, silent when in tune. Use headphones.')),
       h('input', { type: 'checkbox', role: 'switch', checked: s.sonify, onchange: (e: Event) => updateSettings({ sonify: (e.target as HTMLInputElement).checked }) }),
     ),
@@ -365,14 +375,24 @@ export function mountTuner(root: HTMLElement) {
   const palette = () =>
     (colors ??= { good: cssVar('--good'), goodSoft: cssVar('--good-soft'), sharp: cssVar('--sharp'), flat: cssVar('--flat'), surface3: cssVar('--surface-3'), muted: cssVar('--muted') });
   const nameCache = new Map<string, { pretty: string; letter: string; accidental: string }>();
+  /** Names and octaves for readings that are not MIDI notes (other divisions, shrutis, captured notes), keyed from CUSTOM_KEY up. */
+  const customLabels = new Map<number, { name: string; octave: string }>();
+  const CUSTOM_KEY = 10000;
+  const splitName = (pretty: string) => {
+    const accidental = pretty.match(new RegExp(`[♯♭${HALF_SHARP}${HALF_FLAT}]`, 'u'))?.[0] ?? '';
+    return { pretty, letter: pretty.replace(accidental, ''), accidental };
+  };
+  const octaveOf = (key: number) => (key >= CUSTOM_KEY ? (customLabels.get(key)?.octave ?? '') : octaveText(key));
   const noteParts = (midi: number, flats: boolean) => {
+    if (midi >= CUSTOM_KEY) return splitName(customLabels.get(midi)?.name ?? '');
     const key = noteName(midi, flats, false);
-    let v = nameCache.get(key);
+    // Helmholtz writes the note in lower case from octave 3 up.
+    const lower = withOctave('C', midi).startsWith('c');
+    let v = nameCache.get(`${key}|${lower}`);
     if (!v) {
-      const pretty = prettyName(noteName(midi, flats, false));
-      const accidental = pretty.match(/[♯♭]/)?.[0] ?? '';
-      v = { pretty, letter: pretty.replace(accidental, ''), accidental };
-      nameCache.set(key, v);
+      v = splitName(prettyName(key));
+      if (lower) v = { pretty: v.pretty.charAt(0).toLowerCase() + v.pretty.slice(1), letter: v.letter.charAt(0).toLowerCase() + v.letter.slice(1), accidental: v.accidental };
+      nameCache.set(`${key}|${lower}`, v);
     }
     return v;
   };
@@ -474,7 +494,9 @@ export function mountTuner(root: HTMLElement) {
   const freqHz = h('b');
   const targetHz = h('b');
   const vsEqualEl = h('span', { class: 'vs-equal', hidden: true });
-  const freqReading = h('span', { class: 'meta-reading', hidden: true }, h('span', null, freqHz, ' Hz'), h('span', { class: 'sep' }), h('span', null, 'target ', targetHz, ' Hz'), vsEqualEl);
+  const concertEl = h('span', { class: 'vs-equal concert-line', hidden: true });
+  const tipEl = h('p', { class: 'tendency-tip', role: 'note', hidden: true });
+  const freqReading = h('span', { class: 'meta-reading', hidden: true }, h('span', null, freqHz, ' Hz'), h('span', { class: 'sep' }), h('span', null, 'target ', targetHz, ' Hz'), vsEqualEl, concertEl);
   const freqEl = h('div', { class: 'tuner-meta' }, freqMsg, freqReading);
   const showFreqMessage = (text: string) => {
     freqReading.hidden = true;
@@ -657,6 +679,103 @@ export function mountTuner(root: HTMLElement) {
     void noteOn(midi).then((created) => {
       if (followSounding === midi) followOwned = created;
       else if (created) noteOff(midi); // moved on to another note while this one was starting
+    });
+  }
+
+  /* ----- Note lock (01-90) ----- */
+  /** A locked target: a note tapped on the ring, or a frequency typed in. */
+  let lock: { hz: number; concertMidi: number | null } | null = null;
+  let lastConcertMidi: number | null = null;
+  const lockText = h('span', { class: 'muted small' }, 'Tap a note on the ring to lock to it. Hold to hear it.');
+  const lockAuto = h('button', { class: 'chip on', onclick: () => setLock(null) }, 'Auto');
+  const lockHz = h('input', { type: 'number', class: 'compact', min: 20, max: 5000, step: 0.01, placeholder: 'Hz', 'aria-label': 'Lock to a frequency in hertz' });
+  lockHz.addEventListener('change', () => {
+    const hz = Number(lockHz.value);
+    if (hz >= 20 && hz <= 5000) setLock({ hz, concertMidi: null });
+  });
+  const lockRow = h('div', { class: 'row wrap tight lock-row' }, lockAuto, lockHz, lockText);
+  function setLock(next: typeof lock) {
+    lock = next;
+    lockAuto.classList.toggle('on', !lock);
+    if (!lock) lockHz.value = '';
+    const s = getSettings();
+    const semisNow = TRANSPOSITIONS.find((x) => x.id === s.transposition)?.semitones ?? 0;
+    lockText.textContent = !lock ? 'Tap a note on the ring to lock to it. Hold to hear it.' : lock.concertMidi !== null ? `Locked to ${prettyName(noteName(transpose(lock.concertMidi, semisNow), s.flats))}` : `Locked to ${formatHz(lock.hz)} Hz`;
+  }
+  ring.onNote((slot, long) => {
+    const s = getSettings();
+    if (s.tunerMode !== 'chromatic' || s.edo !== 12) return;
+    const semisNow = TRANSPOSITIONS.find((x) => x.id === s.transposition)?.semitones ?? 0;
+    const midi = pitchClassMidiNear(writtenToConcertPc(slot, semisNow), lastConcertMidi ?? 69);
+    const hz = midiToFrequency(midi, tuningOf(s));
+    if (long) {
+      void startReference(hz, null);
+      return;
+    }
+    setLock(lock?.concertMidi === midi ? null : { hz, concertMidi: midi });
+  });
+
+  /* ----- Timpani and bells (01-91, 01-92) ----- */
+  const strikes = new StrikeWatcher();
+  let strikeHz: number | null = null;
+  const timpaniPanel = h('div', { class: 'strings-panel' }, h('small', { class: 'muted' }, 'Strike the drum. The pitch is read once the attack has passed and stays until the next strike.'));
+  let bellPeaks: Peak[] = [];
+  let bellRefHz: number | null = null;
+  let bellsAt = 0;
+  const bellList = h('div', { class: 'bell-list' });
+  const bellsPanel = h('div', { class: 'strings-panel bells-panel' }, h('small', { class: 'muted' }, 'Strike the bell. The five strongest partials are listed. Tap one to tune it; the others are named from the partial you pick as the nominal.'), bellList);
+  function renderBells() {
+    const s = getSettings();
+    const semisNow = TRANSPOSITIONS.find((x) => x.id === s.transposition)?.semitones ?? 0;
+    bellList.replaceChildren(
+      ...bellPeaks.map((pk) => {
+        const n = frequencyToNote(pk.hz, tuningOf(s));
+        const picked = bellRefHz !== null && Math.abs(1200 * Math.log2(pk.hz / bellRefHz)) < 30;
+        const named = bellRefHz ? bellPartial(pk.hz, bellRefHz) : null;
+        return h(
+          'button',
+          { class: `chip bell-peak${picked ? ' on' : ''}`, onclick: () => { bellRefHz = pk.hz; renderBells(); } },
+          `${prettyName(noteName(transpose(n.midi, semisNow), s.flats))} ${signedCents(n.cents, false)} · ${formatHz(pk.hz)} Hz · ${pk.db.toFixed(0)} dB${named && !picked ? ` · ${named.name} ${signedCents(named.error, false)}` : ''}`,
+        );
+      }),
+    );
+  }
+
+  /* ----- Sa and My scale (01-84, 01-85) ----- */
+  const saInput = numberInput(getSettings().saHz, (n) => {
+    if (n >= 50 && n <= 1000) updateSettings({ saHz: Math.round(n * 10) / 10 });
+  }, { min: 50, max: 1000, step: 0.1, class: 'compact' });
+  saInput.setAttribute('aria-label', 'Sa in hertz');
+  const saFromNote = h('button', { class: 'chip', onclick: () => { if (lastHeardHz) updateSettings({ saHz: Math.round(lastHeardHz * 10) / 10 }); } }, 'Use last note');
+  const saPanel = h('div', { class: 'strings-panel' }, h('label', { class: 'row wrap tight' }, h('span', { class: 'muted small' }, 'Sa, Hz'), saInput, saFromNote), h('small', { class: 'muted' }, 'Targets are the 22 shrutis above Sa, from D. S. Thakur, Resonance 2015. Sa, Re, Ga, Ma, Pa, Dha, Ni name the shuddha scale.'));
+  let lastHeardHz: number | null = null;
+  const scalePanel = h('div', { class: 'strings-panel' }, h('small', { class: 'muted scale-note' }, ''), h('button', { class: 'chip', onclick: () => openTools() }, 'Capture notes'));
+
+  const hapticCues = new HapticCues(1000);
+  let stretchKey = '';
+  let stretch: Record<number, number> | null = null;
+  function stretchFor(s: Settings): Record<number, number> | null {
+    if (!s.pianoStretch || Object.keys(s.pianoB).length < 2) return null;
+    const key = JSON.stringify(s.pianoB);
+    if (key !== stretchKey) {
+      stretchKey = key;
+      stretch = stretchCurve(s.pianoB);
+    }
+    return stretch;
+  }
+
+  function openTools() {
+    openTunerTools({
+      onFrame: (fn) => tracker.onFrame(fn),
+      wideSamples: () => tracker.wideSamples(),
+      ensureListening: async () => {
+        if (!tracker.running) await toggle();
+        return tracker.running;
+      },
+      channelTracker: (channel) => {
+        const t = createTracker({ channel: () => channel });
+        return { onFrame: (fn) => t.onFrame(fn), start: () => t.start(), stop: () => t.stop() };
+      },
     });
   }
 
@@ -1066,11 +1185,89 @@ export function mountTuner(root: HTMLElement) {
     let hint: string | null = null;
     let partial: PartialReading | null = null;
     let spec: TargetSpec | null = null;
+    /** Ring slot when the ring shows something other than the 12 pitch classes. */
+    let slot: number | null = null;
+    let concertMidi: number | null = null;
+    if (note && f.frequency && !held) lastHeardHz = f.frequency;
 
-    if (note && f.frequency) {
-      if (s.tunerMode === 'partials') {
+    if (s.tunerMode === 'timpani') {
+      // A drum's pitch is read once per strike from the long analyser, after the attack.
+      if (strikes.update(f.level, nowMs).ready) {
+        const wide = tracker.wideSamples();
+        // Range of a standard set of four drums, about D2 to G3, from Yamaha:
+        // https://www.yamaha.com/en/musical_instrument_guide/timpani/trivia/trivia008.html ; searched a little wider either side.
+        strikeHz = wide ? strikePitch(wide.samples, wide.sampleRate, 60, 400) : null;
+      }
+      if (strikeHz) {
+        const r = frequencyToNote(strikeHz, tuningOf(s));
+        cents = r.cents;
+        target = r.target;
+        concertMidi = r.midi;
+        displayMidi = transpose(r.midi, semis);
+        spec = { kind: 'note', midi: r.midi };
+      }
+    } else if (s.tunerMode === 'bells') {
+      if (f.level >= s.sensitivity && nowMs - bellsAt > 400) {
+        bellsAt = nowMs;
+        const wide = tracker.wideSamples();
+        if (wide) {
+          const peaks = spectrumPeaks(wide.samples, wide.sampleRate, { count: 5, minHz: 60, maxHz: 5000 });
+          if (peaks.length) {
+            bellPeaks = peaks;
+            renderBells();
+          }
+        }
+      }
+      const ref = bellRefHz;
+      const pk = ref ? bellPeaks.find((x) => Math.abs(1200 * Math.log2(x.hz / ref)) < 30) : bellPeaks.reduce<Peak | null>((a, b) => (!a || b.db > a.db ? b : a), null);
+      if (pk && bellPeaks.length) {
+        const r = frequencyToNote(pk.hz, tuningOf(s));
+        cents = r.cents;
+        target = r.target;
+        concertMidi = r.midi;
+        displayMidi = transpose(r.midi, semis);
+        spec = { kind: 'hz', hz: r.target };
+      }
+    } else if (note && f.frequency) {
+      const freq = f.displayFrequency ?? f.frequency;
+      if (s.tunerMode === 'sa') {
+        const r = svaraReading(freq, s.saHz);
+        cents = r.cents;
+        target = r.target;
+        slot = r.index;
+        displayMidi = CUSTOM_KEY + (r.octave + 8) * SHRUTIS.length + r.index;
+        customLabels.set(displayMidi, { name: shrutiName(r.index), octave: r.octave === 0 ? '' : r.octave > 0 ? '·'.repeat(r.octave) : `${-r.octave}↓` });
+        spec = { kind: 'hz', hz: r.target };
+      } else if (s.tunerMode === 'scale') {
+        const r = nearestCaptured(freq, s.capturedScale);
+        if (r) {
+          cents = Math.max(-50, Math.min(50, r.cents));
+          if (Math.abs(r.cents) > 50) hint = lockOffset(freq, r.target).text;
+          target = r.target;
+          slot = r.index;
+          displayMidi = CUSTOM_KEY + 5000 + (r.octave + 8) * 64 + r.index;
+          const n = s.capturedScale[r.index];
+          customLabels.set(displayMidi, { name: n.label || String(r.index + 1), octave: r.octave === 0 ? '' : r.octave > 0 ? `+${r.octave}` : String(r.octave) });
+          spec = { kind: 'hz', hz: r.target };
+        } else hint = 'Capture notes first';
+      } else if (s.tunerMode === 'chromatic' && lock) {
+        const off = lockOffset(freq, lock.hz);
+        target = lock.hz;
+        cents = Math.max(-50, Math.min(50, 1200 * Math.log2(freq / lock.hz)));
+        if (off.semitones !== 0) hint = off.text;
+        concertMidi = lock.concertMidi ?? nearestMidi(lock.hz, s.a4);
+        displayMidi = transpose(concertMidi, semis);
+        spec = { kind: 'hz', hz: lock.hz };
+      } else if (s.tunerMode === 'chromatic' && s.edo !== 12) {
+        const r = edoReading(freq, s.a4, s.edo);
+        cents = r.cents;
+        target = r.target;
+        slot = r.step;
+        displayMidi = CUSTOM_KEY + 20000 + r.absolute;
+        customLabels.set(displayMidi, { name: edoNames(s.edo)[r.step], octave: String(r.octave) });
+        spec = { kind: 'hz', hz: r.target };
+      } else if (s.tunerMode === 'partials') {
         // Natural partials of the chosen fundamental: brass without valves, harmonics on strings.
-        const freq = f.displayFrequency ?? f.frequency;
         partial = nearestPartial(freq, midiToFrequency(s.partialFundamental, tuningOf(s)));
         if (partial) {
           target = partial.target;
@@ -1081,8 +1278,6 @@ export function mountTuner(root: HTMLElement) {
       } else if (s.tunerMode === 'strings') {
         const inst = instrument();
         const tuning = tuningOf(s);
-        // The smoothed frequency, so the needle is as steady here as in chromatic mode.
-        const freq = f.displayFrequency ?? f.frequency;
         let index: number;
         if (manualString !== null) {
           index = manualString;
@@ -1095,6 +1290,7 @@ export function mountTuner(root: HTMLElement) {
         }
         cents = 1200 * Math.log2(freq / target);
         displayMidi = stringMidi(inst, index);
+        concertMidi = displayMidi;
         spec = { kind: 'string', index };
         renderStrings(index, cents);
         hint = tuneHint(cents);
@@ -1102,9 +1298,18 @@ export function mountTuner(root: HTMLElement) {
       } else {
         cents = f.displayCents;
         target = note.target;
+        // Stretched piano tuning: the target moves by the curve from measured notes.
+        const st = stretchFor(s)?.[note.midi] ?? 0;
+        if (st) {
+          cents -= st;
+          target *= Math.pow(2, st / 1200);
+        }
+        concertMidi = note.midi;
         displayMidi = transpose(note.midi, semis);
         spec = { kind: 'note', midi: note.midi };
       }
+      if (s.tunerMode === 'partials' && displayMidi !== null) concertMidi = displayMidi - semis;
+      if (s.tunerMode === 'chromatic' && !held) lastConcertMidi = note.midi;
     } else if (s.tunerMode === 'strings') {
       renderStrings(manualString, null);
     }
@@ -1118,8 +1323,12 @@ export function mountTuner(root: HTMLElement) {
     const nowSec = nowMs / 1000;
     const clean = !held && !f.gated && !hearingSelf && !transient;
     if (clean) recordTuningFrame(cents);
+    if (s.hapticCues && !held && tracker.running) {
+      const pattern = hapticCues.next(cents, s.tolerance, nowMs);
+      if (pattern) haptic(pattern);
+    } else hapticCues.reset();
     // Tendencies count seconds of a note held steady for 300 ms, by concert pitch class for this tuning, so slides and attacks do not count.
-    const chromaticNote = s.tunerMode === 'chromatic' && clean && note ? note : null;
+    const chromaticNote = s.tunerMode === 'chromatic' && s.edo === 12 && !lock && clean && note ? note : null;
     const weight = stableGate.update(chromaticNote?.midi ?? null, nowSec);
     if (chromaticNote && weight > 0) {
       const key = tendencyKey(tuningOf(s));
@@ -1130,7 +1339,7 @@ export function mountTuner(root: HTMLElement) {
       pendingTend = addReading(pendingTend, chromaticNote.pitchClass, chromaticNote.cents, weight);
     }
     // Long tones: when a held note ends, say how steady it was.
-    if (s.tunerMode === 'chromatic' && !f.gated && !hearingSelf) showLongTone(longTones.push(nowSec, note && displayMidi !== null && !held ? displayMidi : null, note?.cents ?? 0));
+    if (s.tunerMode === 'chromatic' && s.edo === 12 && !lock && !f.gated && !hearingSelf) showLongTone(longTones.push(nowSec, note && displayMidi !== null && !held ? displayMidi : null, note?.cents ?? 0));
     voiced.frame(nowSec, !!note);
     const stopAfter = s.tunerAutoStopMinutes;
     if (stopAfter > 0 && voiced.silentFor(nowSec) >= stopAfter * 60) {
@@ -1188,7 +1397,7 @@ export function mountTuner(root: HTMLElement) {
     clearStale();
     shownAt = nowMs;
     const parts = noteParts(displayMidi, s.flats);
-    const octave = String(Math.floor(displayMidi / 12) - 1);
+    const octave = octaveOf(displayMidi);
     setText(noteEl, parts.letter);
     noteEl.classList.toggle('long', parts.letter.length > 1);
     setText(accidentalEl, parts.accidental);
@@ -1207,7 +1416,7 @@ export function mountTuner(root: HTMLElement) {
     if (s.tunerDisplay === 'bar') placeNeedle(cents);
     barMeter.classList.toggle('good', inTune);
 
-    if (ringShown) ring.update({ pitchClass: ((displayMidi % 12) + 12) % 12, cents, inTune, hold }, s.tolerance, s.flats, range);
+    if (ringShown) ring.update({ pitchClass: slot ?? (displayMidi >= CUSTOM_KEY ? null : mod(displayMidi, 12)), cents, inTune, hold }, s.tolerance, s.flats, range);
     view.classList.toggle('in-tune', inTune);
     view.classList.toggle('sharp', !inTune && cents > 0);
     view.classList.toggle('flat', !inTune && cents < 0);
@@ -1215,6 +1424,14 @@ export function mountTuner(root: HTMLElement) {
       lastTarget = spec;
       refBtn.disabled = false;
     }
+    // Written and concert pitch together for a transposing instrument (01-87).
+    const concertText = semis !== 0 && concertMidi !== null && s.tunerMode !== 'strings' ? `concert ${prettyName(noteName(concertMidi, s.flats))}` : '';
+    concertEl.hidden = !concertText;
+    if (concertText) setText(concertEl, concertText);
+    // Known tendency for this written note (01-96).
+    const tip = s.tendencyInstrument && displayMidi < CUSTOM_KEY && s.tunerMode === 'chromatic' ? tipFor(s.tendencyInstrument, displayMidi) : null;
+    tipEl.hidden = !tip;
+    if (tip) setText(tipEl, tip.text);
     freqMsg.hidden = true;
     freqReading.hidden = false;
     setText(freqHz, formatHz(f.frequency!));
@@ -1254,6 +1471,7 @@ export function mountTuner(root: HTMLElement) {
   function showLongTone(note: HeldNote | null) {
     if (!note) return;
     const s = getSettings();
+    if (note.midi >= CUSTOM_KEY) return;
     const parts = noteParts(note.midi, s.flats);
     const seconds = (note.end - note.start).toFixed(1);
     const drift = Math.round(note.drift);
@@ -1310,7 +1528,7 @@ export function mountTuner(root: HTMLElement) {
           path.moveTo(prev.x, prev.y);
           path.lineTo(x, yy);
         } else {
-          labels.push({ x: Math.max(2, x), y: yy, text: `${noteParts(run.midi, s.flats).pretty}${Math.floor(run.midi / 12) - 1}` });
+          labels.push({ x: Math.max(2, x), y: yy, text: `${noteParts(run.midi, s.flats).pretty}${octaveOf(run.midi)}` });
         }
         prev = { x, y: yy };
       }
@@ -1393,6 +1611,20 @@ export function mountTuner(root: HTMLElement) {
 
   /* ----- Layout ----- */
   const s0 = getSettings();
+  const moreModes = select(
+    [
+      { value: '', label: 'More' },
+      { value: 'sa', label: 'Sa (Indian)' },
+      { value: 'scale', label: 'My scale' },
+      { value: 'timpani', label: 'Timpani' },
+      { value: 'bells', label: 'Bells' },
+    ],
+    '',
+    (v) => {
+      if (v) updateSettings({ tunerMode: v as Settings['tunerMode'] });
+    },
+    { 'aria-label': 'More tuner modes', class: 'compact more-modes' },
+  );
   const modeSeg = segmented(
     [
       { value: 'chromatic', label: 'Chromatic', icon: 'tuner' },
@@ -1420,7 +1652,7 @@ export function mountTuner(root: HTMLElement) {
     renderTendencies();
   };
   view.append(
-    h('div', { class: 'toolbar' }, modeSeg, h('div', { class: 'toolbar-end' }, displaySeg, iconButton('gear', 'Tuner options', () => openTunerOptions({ calibrate, resetTendencies })))),
+    h('div', { class: 'toolbar' }, h('div', { class: 'row tight' }, modeSeg, moreModes), h('div', { class: 'toolbar-end' }, displaySeg, iconButton('list', 'Tools', () => openTools()), iconButton('gear', 'Tuner options', () => openTunerOptions({ calibrate, resetTendencies })))),
     h(
       'div',
       { class: 'tuner-cols' },
@@ -1430,6 +1662,8 @@ export function mountTuner(root: HTMLElement) {
         display,
         h('div', { class: 'level-row' }, h('div', { class: 'level', role: 'meter', 'aria-label': 'Input level' }, levelFill, levelTick), clipLight, levelStatus),
         h('div', { class: 'meta-row' }, startBtn, freqEl, agoEl, refBadge, refBtn),
+        lockRow,
+        tipEl,
         longToneEl,
         errorSlot,
         noticeSlot,
@@ -1440,6 +1674,10 @@ export function mountTuner(root: HTMLElement) {
         { class: 'tuner-side' },
         stringsPanel,
         partialsPanel,
+        saPanel,
+        scalePanel,
+        timpaniPanel,
+        bellsPanel,
         h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, traceTitle, h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace, traceText),
         tendPanel,
       ),
@@ -1470,6 +1708,22 @@ export function mountTuner(root: HTMLElement) {
     view.dataset.mode = s.tunerMode;
     view.dataset.damping = s.damping;
     ring.setFixed(s.ringFixed);
+    const divisions =
+      s.tunerMode === 'sa' ? SHRUTIS.map((_, i) => shrutiName(i))
+      : s.tunerMode === 'scale' && s.capturedScale.length >= 2 ? s.capturedScale.map((n, i) => n.label || String(i + 1))
+      : s.tunerMode === 'chromatic' && s.edo !== 12 && !lock ? edoNames(s.edo)
+      : null;
+    ring.setDivisions(divisions);
+    saPanel.hidden = s.tunerMode !== 'sa';
+    scalePanel.hidden = s.tunerMode !== 'scale';
+    timpaniPanel.hidden = s.tunerMode !== 'timpani';
+    bellsPanel.hidden = s.tunerMode !== 'bells';
+    lockRow.hidden = s.tunerMode !== 'chromatic' || s.edo !== 12;
+    if (lockRow.hidden && lock) setLock(null);
+    moreModes.value = ['sa', 'scale', 'timpani', 'bells'].includes(s.tunerMode) ? s.tunerMode : '';
+    if (document.activeElement !== saInput) saInput.value = String(s.saHz);
+    setText(scalePanel.querySelector('.scale-note') as HTMLElement, s.capturedScale.length ? `${s.capturedScale.length} notes captured.` : 'No notes captured yet.');
+    if (s.tunerMode !== 'timpani') strikeHz = null;
     ring.setOffsets(pitchClassOffsets(tuningOf(s), TRANSPOSITIONS.find((t) => t.id === s.transposition)?.semitones ?? 0));
     stringsPanel.hidden = s.tunerMode !== 'strings';
     partialsPanel.hidden = s.tunerMode !== 'partials';

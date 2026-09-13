@@ -268,6 +268,31 @@ await check('tuner partials mode names the partial, and stopping clears the read
   }
 });
 
+await check('tuner: written and concert pitch, quarter tones in 24 equal, and Sa mode', async () => {
+  const setPrefs = (p) => run(`const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k) || '{}'); Object.assign(s, ${JSON.stringify(p)}); localStorage.setItem(k, JSON.stringify(s));`);
+  const read = (hz) => run(`${FAKE_MIC} window.__fake.o.frequency.value = ${hz}; document.querySelector('.tuner-toggle').click(); await wait(2200);
+    const out = { note: document.querySelector('.note-line').textContent, concert: document.querySelector('.concert-line').hidden ? '' : document.querySelector('.concert-line').textContent };
+    document.querySelector('.tuner-toggle').click(); await wait(200); return out;`);
+  await open('tuner');
+  try {
+    await setPrefs({ tunerMode: 'chromatic', tunerDisplay: 'ring', transposition: 'Bb9', spelling: 'flats' });
+    await open('tuner');
+    const sax = await read(440 * Math.pow(2, -11 / 12));
+    assert(sax.note.startsWith('C5') && sax.concert === 'concert B♭3', `tenor sax ${JSON.stringify(sax)}`);
+    await setPrefs({ transposition: 'C', edo: 24 });
+    await open('tuner');
+    const q = await read(440 * Math.pow(2, 50 / 1200));
+    assert(q.note.startsWith('A\u{1D132}4'), `24 equal ${q.note}`);
+    await setPrefs({ edo: 12, tunerMode: 'sa', saHz: 146 });
+    await open('tuner');
+    const pa = await read(219);
+    assert(pa.note.startsWith('Pa'), `Sa mode ${pa.note}`);
+    return `${sax.note} (${sax.concert}), ${q.note}, ${pa.note}`;
+  } finally {
+    await setPrefs({ tunerMode: 'chromatic', transposition: 'C', edo: 12, spelling: 'sharps' });
+  }
+});
+
 const strobeMotion = async () => {
   await open('tuner');
   const out = await run(`${FAKE_MIC}

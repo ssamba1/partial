@@ -2,7 +2,7 @@
 import '@fontsource-variable/space-grotesk';
 import './styles.css';
 import { activeNotes, onDronesChange, stopAll } from './audio/droneBank';
-import { noteName } from './core/notes';
+import { noteName, transpositionShort } from './core/notes';
 import { getSettings, subscribeSettings, updateSettings } from './store/settings';
 import { holdButton, iconButton, openSheet } from './ui/components';
 import { installGlobalShortcuts, restoreMidi } from './ui/controls';
@@ -100,7 +100,7 @@ const tuningChip = h('button', { class: 'tuning-chip', onclick: openTuningSheet,
 function renderTuningChip() {
   tuningLong.textContent = tuningSummary();
   const s = getSettings();
-  tuningShort.textContent = `${s.a4 % 1 ? s.a4.toFixed(1) : s.a4}${s.transposition === 'C' ? '' : ` ${s.transposition.replace('b', '♭')}`}`;
+  tuningShort.textContent = `${s.a4 % 1 ? s.a4.toFixed(1) : s.a4}${transpositionShort(s.transposition) ? ` ${transpositionShort(s.transposition)}` : ''}`;
 }
 const sessionFill = h('i');
 const sessionText = h('span');

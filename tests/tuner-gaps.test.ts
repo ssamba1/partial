@@ -218,7 +218,7 @@ describe('temperament anchor (01-72)', () => {
 
 describe('well temperaments and written key (01-73, 01-74)', () => {
   it('knows which temperaments start from C', () => {
-    expect(TEMPERAMENTS.filter((t) => isWellTemperament(t.id)).map((t) => t.id)).toEqual(['werckmeister3', 'vallotti', 'young2']);
+    expect(TEMPERAMENTS.filter((t) => isWellTemperament(t.id)).map((t) => t.id)).toEqual(['werckmeister3', 'vallotti', 'young2', 'kirnberger3', 'kellner', 'neidhardt1']);
   });
 
   it('converts a written key to concert and back', () => {

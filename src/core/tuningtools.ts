@@ -373,7 +373,9 @@ export function temperamentBeats(tuning: TuningSystem, low = 53, high = 65): Int
 
 /**
  * Least-squares inharmonicity from measured partials, using the stiff string
- * model f_n = n f0 sqrt(1 + B n^2) (Fletcher, J. Acoust. Soc. Am. 36, 203 (1964)).
+ * model f_n = n f0 sqrt(1 + B n^2), where f0 is the frequency the string would have
+ * without stiffness. H. Fletcher, "Normal Vibration Frequencies of a Stiff Piano String",
+ * J. Acoust. Soc. Am. 36(1), 203-209 (1964), https://doi.org/10.1121/1.1918933 (Crossref record).
  * Squaring gives (f_n / n)^2 = f0^2 + f0^2 B n^2, a straight line in n^2.
  */
 export function fitInharmonicity(partials: readonly { n: number; hz: number }[]): { f0: number; B: number } | null {

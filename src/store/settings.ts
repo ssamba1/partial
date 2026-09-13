@@ -1,6 +1,8 @@
 import type { Tendencies } from '../core/intonation';
 import type { MidiAction } from '../core/midi';
-import { clampA4, DEFAULT_MEANTONE_FLATS, sanitizeJustRatios, setNotation, TEMPERAMENTS, tonicFromDrones, TRANSPOSITIONS, type Notation, type Temperament, type TuningSystem } from '../core/notes';
+import { clampA4, concertToWrittenPc, DEFAULT_MEANTONE_FLATS, NOTATIONS, sanitizeJustRatios, setNotation, spellWithFlats, TEMPERAMENTS, tonicFromDrones, TRANSPOSITIONS, type Notation, type OctaveStyle, type Spelling, type Temperament, type TuningSystem } from '../core/notes';
+import { EDOS, type CapturedNote } from '../core/scales';
+import type { TuningCheckEntry } from '../core/tuningtools';
 import { dayKey } from '../core/practice';
 import type { AccentLevel, ClickTrack } from '../core/rhythm';
 import type { Damping } from '../core/tracking';
@@ -39,11 +41,14 @@ export function sanitizeTuningPreset(v: unknown): TuningPreset | null {
   if (!v || typeof v !== 'object') return null;
   const p = v as Partial<TuningPreset>;
   const temperament = TEMPERAMENTS.find((t) => t.id === p.temperament)?.id;
-  if (typeof p.id !== 'string' || typeof p.name !== 'string' || !temperament || !TRANSPOSITIONS.some((t) => t.id === p.transposition)) return null;
+  if (typeof p.id !== 'string' || typeof p.name !== 'string' || !temperament || temperament === 'custom' || !TRANSPOSITIONS.some((t) => t.id === p.transposition)) return null;
   const tonic = Number(p.tonic);
   if (!Number.isInteger(tonic) || tonic < 0 || tonic > 11) return null;
   return { id: p.id, name: p.name.slice(0, 40) || 'Tuning', a4: clampA4(p.a4), temperament, tonic, transposition: p.transposition! };
 }
+
+export type TunerMode = 'chromatic' | 'strings' | 'partials' | 'sa' | 'scale' | 'timpani' | 'bells';
+export const TUNER_MODES: TunerMode[] = ['chromatic', 'strings', 'partials', 'sa', 'scale', 'timpani', 'bells'];
 
 export interface Settings {
   theme: 'system' | 'light' | 'dark';
@@ -51,7 +56,32 @@ export interface Settings {
   temperament: Temperament;
   tonic: number;
   transposition: string;
+  /** Spell with flats. Derived from `spelling` and the key; kept so readers stay simple. */
   flats: boolean;
+  /** Sharps, flats, or follow the key signature of the key note. */
+  spelling: Spelling;
+  /** Scientific (C4) or Helmholtz (c′) octave names. */
+  octaveStyle: OctaveStyle;
+  /** Notes per octave of an equal division for the chromatic tuner; 12 is normal. */
+  edo: number;
+  /** An imported 12-note Scala scale, cents above the key note. */
+  customScale: { name: string; cents: number[] } | null;
+  /** Sa in hertz for the Sa tuner mode. */
+  saHz: number;
+  /** Notes captured from an instrument for the My scale mode. */
+  capturedScale: CapturedNote[];
+  /** Lowest and highest held notes found by the range finder (MIDI). */
+  vocalRange: { low: number; high: number } | null;
+  /** Ensemble tuning checks recorded by a teacher. */
+  tuningChecks: TuningCheckEntry[];
+  /** Vibrate short-short when sharp and long when flat. */
+  hapticCues: boolean;
+  /** Measured piano inharmonicity by MIDI note. */
+  pianoB: Record<number, number>;
+  /** Tune a piano to the stretch curve from the measured notes. */
+  pianoStretch: boolean;
+  /** Instrument whose known tuning tendencies are shown while playing. */
+  tendencyInstrument: string;
   /** In-tune tolerance in cents. */
   tolerance: number;
   /** Mic gate as RMS. */
@@ -67,7 +97,7 @@ export interface Settings {
   followDrone: boolean;
   /** Old all-time statistics per written pitch class; moved to store/tendencies on first load and then left empty. */
   tendencies: Tendencies;
-  tunerMode: 'chromatic' | 'strings' | 'partials';
+  tunerMode: TunerMode;
   /** Concert MIDI note of the fundamental in partials mode. */
   partialFundamental: number;
   /** What stays at the reference in non-equal temperaments. */
@@ -165,6 +195,18 @@ export const DEFAULT_SETTINGS: Settings = {
   tonic: 0,
   transposition: 'C',
   flats: false,
+  spelling: 'sharps',
+  octaveStyle: 'scientific',
+  edo: 12,
+  customScale: null,
+  saHz: 146.8,
+  capturedScale: [],
+  vocalRange: null,
+  tuningChecks: [],
+  hapticCues: false,
+  pianoB: {},
+  pianoStretch: false,
+  tendencyInstrument: '',
   tolerance: 5,
   sensitivity: 0.008,
   micDeviceId: '',
@@ -238,7 +280,7 @@ function safeParse(raw: string | null): Partial<Settings> {
 }
 
 export function mergeSettings(stored: Partial<Settings>): Settings {
-  return {
+  return derive({
     ...DEFAULT_SETTINGS,
     ...stored,
     metronome: { ...DEFAULT_SETTINGS.metronome, ...stored.metronome },
@@ -249,14 +291,54 @@ export function mergeSettings(stored: Partial<Settings>): Settings {
     tunerScale: (['50', '20', '10', 'auto'] as const).includes(stored.tunerScale as TunerScale) ? (stored.tunerScale as TunerScale) : DEFAULT_SETTINGS.tunerScale,
     customTunings: Array.isArray(stored.customTunings) ? stored.customTunings.map(sanitizeTuning).filter((x): x is CustomTuning => x !== null) : [],
     a4: clampA4(stored.a4, DEFAULT_SETTINGS.a4),
-    tunerMode: (['chromatic', 'strings', 'partials'] as const).includes(stored.tunerMode as Settings['tunerMode']) ? (stored.tunerMode as Settings['tunerMode']) : DEFAULT_SETTINGS.tunerMode,
     partialFundamental: Number.isInteger(stored.partialFundamental) && stored.partialFundamental! >= 24 && stored.partialFundamental! <= 72 ? stored.partialFundamental! : DEFAULT_SETTINGS.partialFundamental,
     temperamentAnchor: stored.temperamentAnchor === 'tonic' ? 'tonic' : 'a4',
     justRatios: sanitizeJustRatios(stored.justRatios),
     meantoneFlats: Number.isInteger(stored.meantoneFlats) && stored.meantoneFlats! >= 0 && stored.meantoneFlats! <= 11 ? stored.meantoneFlats! : DEFAULT_MEANTONE_FLATS,
     tuningPresets: Array.isArray(stored.tuningPresets) ? stored.tuningPresets.map(sanitizeTuningPreset).filter((x): x is TuningPreset => x !== null) : [],
     tunerAutoStopMinutes: clampAutoStop(stored.tunerAutoStopMinutes),
-  };
+    tunerMode: TUNER_MODES.includes(stored.tunerMode as TunerMode) ? (stored.tunerMode as TunerMode) : DEFAULT_SETTINGS.tunerMode,
+    notation: NOTATIONS.some((n) => n.id === stored.notation) ? (stored.notation as Notation) : DEFAULT_SETTINGS.notation,
+    transposition: TRANSPOSITIONS.some((x) => x.id === stored.transposition) ? stored.transposition! : 'C',
+    temperament: TEMPERAMENTS.some((x) => x.id === stored.temperament) ? (stored.temperament as Temperament) : 'equal',
+    spelling: (['sharps', 'flats', 'key'] as const).includes(stored.spelling as Spelling) ? (stored.spelling as Spelling) : stored.flats ? 'flats' : 'sharps',
+    octaveStyle: stored.octaveStyle === 'helmholtz' ? 'helmholtz' : 'scientific',
+    edo: (EDOS as readonly number[]).includes(Number(stored.edo)) ? Number(stored.edo) : 12,
+    customScale: sanitizeCustomScale(stored.customScale),
+    saHz: Number.isFinite(Number(stored.saHz)) && Number(stored.saHz) >= 50 && Number(stored.saHz) <= 1000 ? Math.round(Number(stored.saHz) * 10) / 10 : DEFAULT_SETTINGS.saHz,
+    capturedScale: Array.isArray(stored.capturedScale) ? stored.capturedScale.filter((n) => n && Number(n.hz) > 20 && Number(n.hz) < 5000).map((n) => ({ hz: Number(n.hz), label: String(n.label ?? '').slice(0, 12) })).slice(0, 48) : [],
+    vocalRange: stored.vocalRange && Number.isInteger(stored.vocalRange.low) && Number.isInteger(stored.vocalRange.high) ? { low: stored.vocalRange.low, high: stored.vocalRange.high } : null,
+    tuningChecks: Array.isArray(stored.tuningChecks) ? stored.tuningChecks.filter((e) => e && typeof e.player === 'string' && Number.isFinite(e.cents) && Number.isFinite(e.time)) : [],
+    pianoB: sanitizePianoB(stored.pianoB),
+  });
+}
+
+/** Fills in values derived from others: flats from the spelling and the written key. */
+export function derive(s: Settings): Settings {
+  const semis = TRANSPOSITIONS.find((x) => x.id === s.transposition)?.semitones ?? 0;
+  return { ...s, flats: spellWithFlats(s.spelling, concertToWrittenPc(s.tonic, semis)) };
+}
+
+function sanitizeCustomScale(v: unknown): Settings['customScale'] {
+  if (!v || typeof v !== 'object') return null;
+  const c = v as { name?: unknown; cents?: unknown };
+  if (!Array.isArray(c.cents) || c.cents.length !== 12 || !c.cents.every((x) => Number.isFinite(x))) return null;
+  return { name: String(c.name ?? 'Imported').slice(0, 60), cents: c.cents.map(Number) };
+}
+
+function sanitizePianoB(v: unknown): Record<number, number> {
+  const out: Record<number, number> = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const [k, b] of Object.entries(v as Record<string, unknown>)) {
+    const m = Number(k);
+    if (Number.isInteger(m) && m >= 21 && m <= 108 && Number.isFinite(b) && (b as number) >= 0 && (b as number) < 0.1) out[m] = b as number;
+  }
+  return out;
+}
+
+function applyNaming(s: Settings): void {
+  const semis = TRANSPOSITIONS.find((x) => x.id === s.transposition)?.semitones ?? 0;
+  setNotation(s.notation, concertToWrittenPc(s.tonic, semis), s.octaveStyle);
 }
 
 /** Minutes of silence before the tuner stops: 0 (never) to 60. */
@@ -276,7 +358,7 @@ function load(): Settings {
 }
 
 let current = load();
-setNotation(current.notation);
+applyNaming(current);
 const listeners = new Set<(s: Settings) => void>();
 
 export function getSettings(): Settings {
@@ -285,9 +367,11 @@ export function getSettings(): Settings {
 
 export function updateSettings(patch: Partial<Settings> | ((s: Settings) => Partial<Settings>)): Settings {
   const p = typeof patch === 'function' ? patch(current) : patch;
-  current = { ...current, ...p };
+  // An old caller setting `flats` directly picks sharps or flats.
+  const spelling = p.spelling ?? (p.flats !== undefined ? (p.flats ? 'flats' : 'sharps') : current.spelling);
+  current = derive({ ...current, ...p, spelling });
   // Note names are read synchronously all over the UI, so update the naming system before notifying.
-  setNotation(current.notation);
+  applyNaming(current);
   try {
     localStorage.setItem(KEY, JSON.stringify(current));
   } catch {
@@ -317,6 +401,7 @@ export function tuningOf(s: Settings): TuningSystem {
     anchor: s.temperamentAnchor,
     justRatios: s.justRatios,
     meantoneFlats: s.meantoneFlats,
+    customCents: s.temperament === 'custom' ? s.customScale?.cents : undefined,
   };
 }
 

@@ -59,6 +59,10 @@ export class PitchTracker {
   private highpassHz = 0;
   private raf = 0;
   private buffer = new Float32Array(4096);
+  /** A longer analyser read only on request, for struck sounds that need fine frequency resolution. */
+  private wide: AnalyserNode | null = null;
+  private wideBuffer: Float32Array<ArrayBuffer> | null = null;
+  private sampleRate = 48000;
   private state: FrameState = createFrameState();
   private listeners = new Set<(f: TrackerFrame) => void>();
   running = false;
@@ -123,7 +127,12 @@ export class PitchTracker {
     tail.connect(this.highpass, tailOutput);
     this.highpass.connect(lowpass);
     lowpass.connect(this.analyser);
-    this.nodes.push(this.highpass, lowpass);
+    this.wide = ctx.createAnalyser();
+    this.wide.fftSize = 32768;
+    this.wide.smoothingTimeConstant = 0;
+    lowpass.connect(this.wide);
+    this.sampleRate = ctx.sampleRate;
+    this.nodes.push(this.highpass, lowpass, this.wide);
 
     this.running = true;
     this.state = createFrameState();
@@ -166,6 +175,14 @@ export class PitchTracker {
     this.raf = requestAnimationFrame(loop);
   }
 
+  /** The latest 32768 samples (about 0.7 s at 48 kHz), copied, or null when not running. */
+  wideSamples(): { samples: Float32Array; sampleRate: number } | null {
+    if (!this.running || !this.wide) return null;
+    this.wideBuffer ??= new Float32Array(this.wide.fftSize);
+    this.wide.getFloatTimeDomainData(this.wideBuffer);
+    return { samples: this.wideBuffer.slice(), sampleRate: this.sampleRate };
+  }
+
   /** High-pass at 0.7 x the lowest expected pitch. */
   private setHighpass(): void {
     if (!this.highpass) return;
@@ -188,6 +205,7 @@ export class PitchTracker {
     this.highpassHz = 0;
     this.source = null;
     this.analyser = null;
+    this.wide = null;
     releaseMic();
   }
 }
