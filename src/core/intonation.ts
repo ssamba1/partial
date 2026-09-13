@@ -42,6 +42,38 @@ export function summarize(t: Tendencies, minCount = 1): TendencySummary[] {
     .sort((a, b) => a.pitchClass - b.pitchClass);
 }
 
+export interface TakeReport {
+  readings: { t: number; midi: number | null; cents: number }[];
+  notes: HeldNote[];
+  /** Share of voiced frames within the tolerance, 0..1. */
+  inTune: number;
+  meanCents: number;
+  voicedSeconds: number;
+}
+
+/**
+ * Offline intonation report for a recorded take: runs the given pitch function
+ * over hops of the signal, then groups frames into held notes.
+ */
+export function analyzeTake(
+  samples: Float32Array,
+  sampleRate: number,
+  toNote: (frame: Float32Array) => { midi: number; cents: number } | null,
+  tolerance: number,
+  frameSize = 4096,
+  hop = 1024,
+): TakeReport {
+  const readings: TakeReport['readings'] = [];
+  for (let start = 0; start + frameSize <= samples.length; start += hop) {
+    const r = toNote(samples.subarray(start, start + frameSize));
+    readings.push({ t: (start + frameSize / 2) / sampleRate, midi: r?.midi ?? null, cents: r?.cents ?? 0 });
+  }
+  const voiced = readings.filter((r) => r.midi !== null);
+  const inTune = voiced.length ? voiced.filter((r) => Math.abs(r.cents) <= tolerance).length / voiced.length : 0;
+  const meanCents = voiced.length ? voiced.reduce((a, r) => a + r.cents, 0) / voiced.length : 0;
+  return { readings, notes: segmentNotes(readings), inTune, meanCents, voicedSeconds: (voiced.length * hop) / sampleRate };
+}
+
 export interface HeldNote {
   midi: number;
   start: number;

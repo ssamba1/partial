@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addReading, advanceStrobe, segmentNotes, summarize } from '../src/core/intonation';
+import { addReading, advanceStrobe, analyzeTake, segmentNotes, summarize } from '../src/core/intonation';
 import { beatNoise, isBarMuted, isBeatRandomlyMuted, polyOffsets, tempoMarking } from '../src/core/rhythm';
 
 describe('gap trainer and random muting', () => {
@@ -67,6 +67,38 @@ describe('tendencies', () => {
     expect(e.mean).toBeCloseTo(10, 9);
     expect(e.spread).toBeCloseTo(Math.sqrt(8 / 3), 9);
     expect(summarize(t, 2).map((x) => x.pitchClass)).toEqual([4]);
+  });
+});
+
+describe('analyzeTake', () => {
+  it('reports a sharp A then an in-tune C from a synthetic recording', async () => {
+    const { detectPitch } = await import('../src/core/pitch');
+    const { frequencyToNote } = await import('../src/core/notes');
+    const sr = 48000;
+    const seg = sr; // 1 s each
+    const samples = new Float32Array(seg * 2);
+    const fA = 440 * Math.pow(2, 20 / 1200);
+    const fC = 523.2511306;
+    for (let i = 0; i < seg; i++) samples[i] = 0.5 * Math.sin((2 * Math.PI * fA * i) / sr);
+    for (let i = 0; i < seg; i++) samples[seg + i] = 0.5 * Math.sin((2 * Math.PI * fC * i) / sr);
+    const report = analyzeTake(
+      samples,
+      sr,
+      (frame) => {
+        const p = detectPitch(frame, { sampleRate: sr });
+        if (!p) return null;
+        const n = frequencyToNote(p.frequency);
+        return { midi: n.midi, cents: n.cents };
+      },
+      5,
+    );
+    const midis = report.notes.map((n) => n.midi);
+    expect(midis).toEqual([69, 72]);
+    expect(report.notes[0].meanCents).toBeCloseTo(20, 0);
+    expect(Math.abs(report.notes[1].meanCents)).toBeLessThan(1);
+    // Roughly half the voiced frames are in tune (the C), allowing for frames straddling the boundary.
+    expect(report.inTune).toBeGreaterThan(0.4);
+    expect(report.inTune).toBeLessThan(0.6);
   });
 });
 
