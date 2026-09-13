@@ -101,7 +101,7 @@ synthesized microphone signal. It checks that every screen renders, tuner
 readings, the tuner running alongside the metronome, exact metronome timing,
 the interval trainer, recording with its intonation report, sheet music import
 with annotation and half-page turns, and loading offline with the server
-stopped. CI runs it on every push. During development the same approach was used
+stopped. The CI workflow is set up to run it on every push (it has not run yet, since the repository is not on GitHub). During development the same approach was used
 to confirm count-in, click-track playback, video takes, and that all 16 click
 sounds render with similar peak levels.
 
