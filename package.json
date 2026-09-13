@@ -1,0 +1,23 @@
+{
+  "name": "resonare",
+  "version": "0.1.0",
+  "description": "Free, open-source tuner, metronome, drone, click tracks, recorder, analysis and sheet music for musicians.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.3.289"
+  }
+}

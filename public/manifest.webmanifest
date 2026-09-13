@@ -1,0 +1,14 @@
+{
+  "name": "Resonare",
+  "short_name": "Resonare",
+  "description": "Free, open-source tuner, metronome, drone, click tracks, recorder, analysis and sheet music.",
+  "start_url": "./#/tuner",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f5f1",
+  "theme_color": "#1f6f5c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
