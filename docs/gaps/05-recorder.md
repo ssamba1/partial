@@ -656,7 +656,7 @@ Effort: M
 
 ### No teacher feedback workflow on takes
 Evidence: no comments model. TE for Education and BandLab offer assignment and feedback flows [unverified].
-Fix: time-stamped comments `{t, author, text}` on the entry, and a "Send for feedback" zip containing the take plus comments.json. The teacher opens it by import, adds comments, and exports a `.resonare-feedback.json` that the student imports to merge comments by take id.
+Fix: time-stamped comments `{t, author, text}` on the entry, and a "Send for feedback" zip containing the take plus comments.json. The teacher opens it by import, adds comments, and exports a `.partial-feedback.json` that the student imports to merge comments by take id.
 Effort: M
 
 ### No time-stamped self-comments

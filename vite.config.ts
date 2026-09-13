@@ -11,7 +11,7 @@ function offlineSupport(): Plugin {
   let outDir = 'dist';
   let buildId = 'dev';
   return {
-    name: 'resonare-offline',
+    name: 'partial-offline',
     apply: 'build',
     configResolved(config) {
       outDir = resolve(config.root, config.build.outDir);

@@ -1,7 +1,7 @@
-# Resonare: design
+# Partial: design
 
 Free, open-source (MIT) practice studio covering and extending what TonalEnergy's
-TE Tuner & Metronome offers. "Resonare" is a working name.
+TE Tuner & Metronome offers. Named "Partial" on 2026-09-13 (working name was "Resonare", which an App Store app already uses).
 
 Direction agreed in chat on 2026-09-12: one installable web app on a shared audio
 core, every feature in scope. On 2026-09-12 and 2026-09-13 the interface was

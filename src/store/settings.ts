@@ -87,7 +87,7 @@ export interface Settings {
   announce: boolean;
 }
 
-const KEY = 'resonare.settings.v1';
+const KEY = 'partial.settings.v1';
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',

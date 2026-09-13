@@ -1,6 +1,6 @@
 {
-  "name": "Resonare",
-  "short_name": "Resonare",
+  "name": "Partial",
+  "short_name": "Partial",
   "description": "Free, open-source tuner, metronome, drone, click tracks, recorder, analysis and sheet music.",
   "start_url": "./#/tuner",
   "scope": "./",

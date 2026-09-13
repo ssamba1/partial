@@ -16,7 +16,7 @@ Effort: S
 
 ### Closing or reloading the tab loses the running session
 Evidence: The codebase has no `pagehide`, `beforeunload` or `visibilitychange` handler (grep over `src/`). `ActivityTimer.stop()` (`shared.ts:53`) and the metronome's `onState` are the only places time gets written. A phone browser that kills the page while the metronome runs logs nothing.
-Fix: Add a 30 s checkpoint for each open interval, stored under `resonare.openSessions`. Flush on `pagehide` and on `visibilitychange` to hidden. At startup, recover leftover open sessions and credit them up to their last checkpoint.
+Fix: Add a 30 s checkpoint for each open interval, stored under `partial.openSessions`. Flush on `pagehide` and on `visibilitychange` to hidden. At startup, recover leftover open sessions and credit them up to their last checkpoint.
 Effort: S
 
 ### A forgotten metronome or drone logs hours of "practice"
@@ -282,7 +282,7 @@ Effort: M
 
 ### Metronome running in two tabs doubles practice time
 Evidence: The metronome is a module singleton per tab (`shared.ts:7`). Two tabs each log.
-Fix: Put a `BroadcastChannel('resonare')` presence message on each session open and union intervals across tabs by timestamp in the session store (store absolute UTC times).
+Fix: Put a `BroadcastChannel('partial')` presence message on each session open and union intervals across tabs by timestamp in the session store (store absolute UTC times).
 Effort: S
 
 ### MIDI actions fire in every open tab
@@ -302,7 +302,7 @@ Effort: S
 
 ### Corrupted settings JSON gets overwritten and lost for good
 Evidence: `safeParse` returns `{}` on a parse error (`settings.ts:147`). The next `updateSettings` writes defaults over the raw string, destroying recoverable history.
-Fix: On a parse failure, copy the raw string to `resonare.settings.corrupt.<timestamp>` before continuing and offer a "Download damaged data" button. Also try recovering `practiceLog` with a tolerant extraction regex.
+Fix: On a parse failure, copy the raw string to `partial.settings.corrupt.<timestamp>` before continuing and offer a "Download damaged data" button. Also try recovering `practiceLog` with a tolerant extraction regex.
 Effort: S
 
 ### Stored and imported values are never type-checked
@@ -311,7 +311,7 @@ Fix: Write a hand-written `validateSettings(raw): {settings, issues[]}` that coe
 Effort: M
 
 ### No schema version or migration path
-Evidence: The key is `resonare.settings.v1` (`settings.ts:90`) but the object has no `version` field and there is no migrate step. The IndexedDB upgrade (`db.ts:52-57`) only creates stores. A renamed field would silently reset.
+Evidence: The key is `partial.settings.v1` (`settings.ts:90`) but the object has no `version` field and there is no migrate step. The IndexedDB upgrade (`db.ts:52-57`) only creates stores. A renamed field would silently reset.
 Fix: Add `schemaVersion` to `Settings` and a `migrations: Record<number, (s) => s>` run in order on load and import, with a test per migration using stored fixtures. Do the same for IndexedDB with `oldVersion` in `onupgradeneeded`.
 Effort: S
 
@@ -324,7 +324,7 @@ Effort: S
 
 ### Import accepts almost any JSON
 Evidence: `practice.ts:280` checks only `'a4' in data`. File size is not limited, so a huge file is fully read and parsed on the main thread.
-Fix: Reject files over 5 MB. Require a `format: 'resonare-backup'` marker plus `schemaVersion` (accept marker-less legacy files through the validator). List any fields that were repaired.
+Fix: Reject files over 5 MB. Require a `format: 'partial-backup'` marker plus `schemaVersion` (accept marker-less legacy files through the validator). List any fields that were repaired.
 Effort: S
 
 ### Import replaces history instead of merging it
@@ -334,7 +334,7 @@ Effort: M
 
 ### Import and Reset overwrite with no preview and no undo
 Evidence: Import applies immediately (`practice.ts:281`). Reset wipes after a native confirm (`practice.ts:295-296`). Neither keeps a copy. Gap item 71 covers takes, scores and presets, not whole-state operations.
-Fix: Before either, save a snapshot to `resonare.settings.snapshot.<timestamp>`, keeping the last 3 and pruning older ones on quota errors. Show a toast "Backup restored · Undo" that restores the snapshot. List snapshots on the data screen.
+Fix: Before either, save a snapshot to `partial.settings.snapshot.<timestamp>`, keeping the last 3 and pruning older ones on quota errors. Show a toast "Backup restored · Undo" that restores the snapshot. List snapshots on the data screen.
 Effort: S
 
 ### Importing the same file a second time does nothing
@@ -358,8 +358,8 @@ Fix: Add per-section reset: Tuner, Metronome, Drones, Presets, Click tracks, MID
 Effort: S
 
 ### No true "delete all my data"
-Evidence: Reset keeps recordings, scores and annotations (`practice.ts:295`). Nothing clears the IndexedDB `resonare` database, Cache Storage or the service worker.
-Fix: Add "Erase everything on this device": `indexedDB.deleteDatabase('resonare')`, `localStorage` keys with the `resonare.` prefix, `caches.keys()` deletion, service worker `unregister()`, then reload. Guard it with a typed confirmation word. Explain how to revoke the mic, camera and MIDI permissions in browser settings.
+Evidence: Reset keeps recordings, scores and annotations (`practice.ts:295`). Nothing clears the IndexedDB `partial` database, Cache Storage or the service worker.
+Fix: Add "Erase everything on this device": `indexedDB.deleteDatabase('partial')`, `localStorage` keys with the `partial.` prefix, `caches.keys()` deletion, service worker `unregister()`, then reload. Guard it with a typed confirmation word. Explain how to revoke the mic, camera and MIDI permissions in browser settings.
 Effort: S
 
 ### No view of what is stored
@@ -369,7 +369,7 @@ Effort: S
 
 ### Backup file has no metadata
 Evidence: The export is raw `getSettings()` (`practice.ts:235`), with no app version, schema version, export timestamp or origin.
-Fix: Wrap it as `{format:'resonare-backup', schemaVersion, appVersion: __BUILD_ID__, exportedAt, settings}` and have import accept both shapes.
+Fix: Wrap it as `{format:'partial-backup', schemaVersion, appVersion: __BUILD_ID__, exportedAt, settings}` and have import accept both shapes.
 Effort: S
 
 ### Backups carry device-specific settings to other devices
@@ -399,7 +399,7 @@ Effort: M
 
 ### Backups are not encrypted
 Evidence: Exports are plain JSON (`practice.ts:235`). Once gap item 51's full zip includes recordings (for example, video of a child), a lost file exposes them.
-Fix: Add an optional password: PBKDF2-SHA-256 (with a high iteration count; take the current OWASP figure before choosing) to AES-GCM via WebCrypto, stored as `{salt, iv, ciphertext}` with a `.resonare-enc` extension. Import prompts for the password. Round-trip test.
+Fix: Add an optional password: PBKDF2-SHA-256 (with a high iteration count; take the current OWASP figure before choosing) to AES-GCM via WebCrypto, stored as `{salt, iv, ciphertext}` with a `.partial-enc` extension. Import prompts for the password. Round-trip test.
 Effort: S
 
 ### CSV totals do not match the activity columns
@@ -409,7 +409,7 @@ Effort: S
 
 ### No calendar (ICS) export
 Evidence: None exists.
-Fix: Export sessions as RFC 5545 `VEVENT`s (`DTSTART`/`DTEND` in UTC, `SUMMARY:Practice: <piece>`, `UID:<sessionId>@resonare`). Planned practice exports as events with `VALARM` reminders, which gives reminders without push notifications.
+Fix: Export sessions as RFC 5545 `VEVENT`s (`DTSTART`/`DTEND` in UTC, `SUMMARY:Practice: <piece>`, `UID:<sessionId>@partial`). Planned practice exports as events with `VALARM` reminders, which gives reminders without push notifications.
 Effort: S
 
 ### Downloads rely on clicking a detached link
@@ -472,7 +472,7 @@ Effort: S
 ## G. Privacy and security
 
 ### Deploying on GitHub Pages would share storage with other sites
-Evidence: `vite.config.ts:33-34` targets subfolder deploys such as GitHub Pages. Every `user.github.io/<repo>` page shares one origin, so any of that user's other project pages can read `resonare.settings.v1`, the `resonare` IndexedDB (recordings, including video) and the camera or mic permission grant.
+Evidence: `vite.config.ts:33-34` targets subfolder deploys such as GitHub Pages. Every `user.github.io/<repo>` page shares one origin, so any of that user's other project pages can read `partial.settings.v1`, the `partial` IndexedDB (recordings, including video) and the camera or mic permission grant.
 Fix: Deploy on a dedicated origin (custom domain or subdomain). Document it in the README. At startup, show a warning when `location.pathname` is not `/` on a `github.io` host.
 Effort: S
 
@@ -505,7 +505,7 @@ Effort: S
 
 ### No separate profiles for several students on one device
 Evidence: A single `KEY` (`settings.ts:90`) and a single IndexedDB name (`db.ts:40`).
-Fix: Add `resonare.profiles = [{id, name, color}]` and an active profile. Namespace settings as `resonare.settings.v1.<profileId>` and add a `profileId` index or field on recordings, sessions and annotations (scores can be shared). Add a profile switcher in the top bar and migrate existing data into a "Default" profile.
+Fix: Add `partial.profiles = [{id, name, color}]` and an active profile. Namespace settings as `partial.settings.v1.<profileId>` and add a `profileId` index or field on recordings, sessions and annotations (scores can be shared). Add a profile switcher in the top bar and migrate existing data into a "Default" profile.
 Effort: L
 
 ### Children can reset or overwrite data in one tap

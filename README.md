@@ -1,6 +1,6 @@
-# Resonare
+# Partial
 
-Resonare is a free, open-source practice app for musicians. It has a tuner, a
+Partial is a free, open-source practice app for musicians. It has a tuner, a
 metronome, drones and an exercise player, click tracks, a recorder that checks
 your intonation, pitch analysis, and a sheet music reader you can write on. It
 runs in the browser and can be installed like an app.
@@ -8,7 +8,7 @@ runs in the browser and can be installed like an app.
 You don't need an account, and nothing costs money. The app has no ads or
 tracking, and everything you save stays on your own device.
 
-Resonare is an independent project and is not affiliated with TonalEnergy.
+Partial is an independent project and is not affiliated with TonalEnergy.
 
 ## Features
 

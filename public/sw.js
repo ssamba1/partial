@@ -1,7 +1,7 @@
 // Offline support: network-first for pages, cache-first for hashed assets.
 // The build replaces __BUILD_ID__ with a hash of the bundle, so every release is a
 // byte-different service worker: browsers install it and the old cache is dropped.
-const CACHE = 'resonare-__BUILD_ID__';
+const CACHE = 'partial-__BUILD_ID__';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-maskable.svg'];
 
 self.addEventListener('install', (event) => {

@@ -37,7 +37,7 @@ interface Stores {
 }
 type StoreName = keyof Stores;
 
-const DB_NAME = 'resonare';
+const DB_NAME = 'partial';
 const DB_VERSION = 2;
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -58,7 +58,7 @@ function open(): Promise<IDBDatabase> {
       req.onblocked = () => {
         // Another tab still has the old database version open.
         dbPromise = null;
-        reject(new Error('Resonare is open in another tab with an older version. Close that tab and try again.'));
+        reject(new Error('Partial is open in another tab with an older version. Close that tab and try again.'));
       };
       req.onsuccess = () => {
         const database = req.result;

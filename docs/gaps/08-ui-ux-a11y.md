@@ -564,7 +564,7 @@ Effort: S
 
 ### 112. No "ready to work offline" confirmation
 Evidence: main.ts:238-244 registers the service worker silently, and the README promises offline use after the first visit. This is separate from gap item 61, the update prompt.
-Fix: on first `registration.installing` reaching `activated` with no previous controller, `toast('Resonare is ready to use offline')`.
+Fix: on first `registration.installing` reaching `activated` with no previous controller, `toast('Partial is ready to use offline')`.
 Effort: S
 
 ### 113. Error messages expose raw exception text
@@ -584,7 +584,7 @@ Effort: S
 
 ### 116. Explain the microphone before the browser asks
 Evidence: the first tap on the ring triggers the browser prompt directly (tuner.ts:370), and the welcome sheet (main.ts:221-236) never mentions the microphone. This is separate from gap item 42.
-Fix: on the first tuner start (settings flag `micPrimed`), show a sheet first: "Resonare listens to your instrument to show pitch. Audio never leaves this device." with an "Allow microphone" button that calls `tracker.start()`.
+Fix: on the first tuner start (settings flag `micPrimed`), show a sheet first: "Partial listens to your instrument to show pitch. Audio never leaves this device." with an "Allow microphone" button that calls `tracker.start()`.
 Effort: S
 
 ### 117. Tuner resets when you return to it

@@ -95,7 +95,7 @@ Fix: For each held note in `segmentNotes`, store its mean RMS. Draw a cents-vs-d
 Effort: M
 
 ### [Band student] School Chromebook deployment check
-Evidence: TE for Education lists Chromebook support (https://play.google.com/store/apps/details?id=com.tonalenergy.tetunered). Resonare has been tested only in Chrome and Edge on desktop (README). Managed ChromeOS may block the microphone by policy [unverified].
+Evidence: TE for Education lists Chromebook support (https://play.google.com/store/apps/details?id=com.tonalenergy.tetunered). Partial has been tested only in Chrome and Edge on desktop (README). Managed ChromeOS may block the microphone by policy [unverified].
 Fix: Test the installed PWA on a managed Chromebook. Write `docs/schools.md` with the admin policy needed for microphone access and the PWA install URL.
 Effort: S
 
@@ -150,7 +150,7 @@ Fix: Select 2 takes to get overlaid intonation charts aligned by the first onset
 Effort: M
 
 ### [College music major] Ear training exercises
-Evidence: TE for Education lists ear training exercises (https://www.tonalenergy.com/te-education). ABRSM aural tests include identifying chords and cadences (https://www.abrsm.org/en-gb/about-our-exams/syllabuses). Resonare's interval trainer measures played intervals only.
+Evidence: TE for Education lists ear training exercises (https://www.tonalenergy.com/te-education). ABRSM aural tests include identifying chords and cadences (https://www.abrsm.org/en-gb/about-our-exams/syllabuses). Partial's interval trainer measures played intervals only.
 Fix: Add a `src/core/eartraining.ts` question generator (intervals, chord qualities, cadences, short melodic dictation) played with the drone voices. Answer by buttons or by singing, and store spaced-repetition stats per item.
 Effort: L
 
@@ -245,7 +245,7 @@ Fix: Add `swing: number` (50 to 75%) to `MeterConfig`. `barEvents` offsets every
 Effort: S
 
 ### [Jazz musician] Play-along from chord changes
-Evidence: iReal Pro offers more than 50 backing styles from chord charts (https://www.irealpro.com/). Resonare has no chord chart or accompaniment.
+Evidence: iReal Pro offers more than 50 backing styles from chord charts (https://www.irealpro.com/). Partial has no chord chart or accompaniment.
 Fix: Add `Chart {bars:[{chords:[{root, quality, beats}]}], form, key, style}`, a text editor, and a simple generator (walking bass, shell voicings, ride pattern) scheduled through `LookaheadScheduler` with transpose and tempo. Start with 3 styles.
 Effort: XL
 
@@ -275,7 +275,7 @@ Fix: Add `settings.capo: number`. Targets become `strings[i] + capo`, and the la
 Effort: S
 
 ### [Guitarist] Intonation setup assistant
-Evidence: Peterson positions its tuners for setting guitar intonation (https://www.petersontuners.com/myinstrument/electric). Resonare has no setup flow.
+Evidence: Peterson positions its tuners for setting guitar intonation (https://www.petersontuners.com/myinstrument/electric). Partial has no setup flow.
 Fix: Per string, capture the 12th-fret harmonic, then the fretted 12th, and show the difference in cents with the direction to move the saddle [unverified rule: fretted sharp means lengthen]. Save `SetupLog {date, instrumentName, diffs[]}` for later comparison.
 Effort: M
 
@@ -290,7 +290,7 @@ Fix: Add `courses?: number[][]` so a course can hold an octave pair. `nearestStr
 Effort: S
 
 ### [Guitarist] Chord diagrams in any tuning
-Evidence: Fender Tune has a chord library that generates shapes in any tuning (https://apps.apple.com/us/app/fender-tune-guitar-tuner-app/id1107017950). Resonare has none.
+Evidence: Fender Tune has a chord library that generates shapes in any tuning (https://apps.apple.com/us/app/fender-tune-guitar-tuner-app/id1107017950). Partial has none.
 Fix: Add a `src/core/chordShapes.ts` solver: given tuning, capo and chord pitch classes, enumerate playable voicings within a 4-fret span and rank them by fingers and completeness. Render SVG diagrams, and let a tap sound the chord.
 Effort: L
 
@@ -310,17 +310,17 @@ Fix: Draw horizontal lines at each semitone within ±2 notes, labelled with fret
 Effort: M
 
 ### [Drummer] Drum lug tuning mode
-Evidence: Tune-Bot measures pitch struck near each lug and filters overtones (https://tune-bot.com/). YIN on a decaying drum hit is untested in Resonare (`src/core/pitch.ts`).
+Evidence: Tune-Bot measures pitch struck near each lug and filters overtones (https://tune-bot.com/). YIN on a decaying drum hit is untested in Partial (`src/core/pitch.ts`).
 Fix: Add a percussive mode: trigger on onset, take the spectral peak in a 100 to 600 ms window, and show Hz. Build a head diagram with N lugs where each hit fills the selected lug, plus the maximum spread. Benchmark on recorded toms before release.
 Effort: M
 
 ### [Drummer] Tom interval planner
-Evidence: Tune-Bot has a drum tuning calculator (https://tune-bot.com/tuning-calculator/). Resonare has none.
+Evidence: Tune-Bot has a drum tuning calculator (https://tune-bot.com/tuning-calculator/). Partial has none.
 Fix: Add `Kit {drums:[{name, sizeIn, targetHz}]}` with interval presets (fourths, thirds) from a chosen floor-tom note, and link targets to the lug mode.
 Effort: S
 
 ### [Timpanist] Timpani preset and pitch check
-Evidence: TE suggests sustaining a reference tone and tuning timpani by ear (https://www.tonalenergy.com/te-mobile). Resonare drones can do that, but there is no timpani profile. Which partial listeners hear as timpani pitch is [unverified].
+Evidence: TE suggests sustaining a reference tone and tuning timpani by ear (https://www.tonalenergy.com/te-mobile). Partial drones can do that, but there is no timpani profile. Which partial listeners hear as timpani pitch is [unverified].
 Fix: Add a timpani profile: headphone-reference button per drum (4 drums with ranges), percussive-mode reading tuned on recorded timpani, and a "next note change" list from the part.
 Effort: M
 
@@ -355,7 +355,7 @@ Fix: Add `grouping?: number[]` to `MeterConfig`, applying accents and gaps betwe
 Effort: S
 
 ### [Pianist] Piano tuning with inharmonicity and stretch
-Evidence: TuneLab measures inharmonicity and builds a stretch curve (https://www.tunelab-world.com/TuneLab%20Piano%20Tuner%204.4.pdf). Resonare targets exact equal temperament.
+Evidence: TuneLab measures inharmonicity and builds a stretch curve (https://www.tunelab-world.com/TuneLab%20Piano%20Tuner%204.4.pdf). Partial targets exact equal temperament.
 Fix: Measure the inharmonicity coefficient B on 5 or more notes from partial frequencies (8192+ FFT). Compute the per-key target offsets for chosen octave-type stretch, and add a piano mode showing target cents per key. Add a disclaimer about pin and string damage.
 Effort: L
 
@@ -445,12 +445,12 @@ Fix: Add a plucked-string synth (Karplus-Strong plus a bridge-buzz nonlinearity)
 Effort: L
 
 ### [Hindustani musician] Tala cycles with sam, taali and khali
-Evidence: iTablaPro includes 47 taals and shows the current matra and divisions (https://apps.apple.com/us/app/itablapro-tabla-tanpura-player/id337350026). The Resonare metronome has only accent, normal and silent (`rhythm.ts:1`).
+Evidence: iTablaPro includes 47 taals and shows the current matra and divisions (https://apps.apple.com/us/app/itablapro-tabla-tanpura-player/id337350026). The Partial metronome has only accent, normal and silent (`rhythm.ts:1`).
 Fix: Add `Tala {name, matras, vibhags:number[], markers:('sam'|'taali'|'khali')[]}` with a circular matra display, bol labels and a distinct sound per marker. Get the data reviewed by a tabla player.
 Effort: M
 
 ### [Carnatic musician] Suladi talas with jathi and gati
-Evidence: Tala Shruti includes the 7 Suladi talas with configurable jathi (https://apps.apple.com/us/app/tala-shruti/id6740571964). Resonare has no Carnatic tala model.
+Evidence: Tala Shruti includes the 7 Suladi talas with configurable jathi (https://apps.apple.com/us/app/tala-shruti/id6740571964). Partial has no Carnatic tala model.
 Fix: Model `anga` sequences (laghu with jathi, dhrutam, anudhrutam) with hand-action visuals (clap, finger counts, wave) and gati subdivision. Reviewed by a Carnatic teacher.
 Effort: M
 
@@ -535,7 +535,7 @@ Fix: After recording, estimate the key (pitch-class histogram against key profil
 Effort: M
 
 ### [Singer-songwriter] Stem separation to learn covers
-Evidence: Moises separates vocals, drums, bass and guitar (https://moises.ai/features/). Resonare has nothing similar.
+Evidence: Moises separates vocals, drums, bass and guitar (https://moises.ai/features/). Partial has nothing similar.
 Fix: Prototype an open-weights separation model in the browser with ONNX Runtime Web, after checking the license and model size. Lazy-load it, and run it on the device only.
 Effort: XL
 
@@ -545,7 +545,7 @@ Fix: Add a ChordPro parser in `src/core/chordpro.ts`, a renderer with transpose 
 Effort: M
 
 ### [Singer-songwriter] Genre drum loops instead of a click
-Evidence: Fender Tune has 60 drum rhythms in 6 genres (https://apps.apple.com/us/app/fender-tune-guitar-tuner-app/id1107017950). Resonare has clicks only.
+Evidence: Fender Tune has 60 drum rhythms in 6 genres (https://apps.apple.com/us/app/fender-tune-guitar-tuner-app/id1107017950). Partial has clicks only.
 Fix: Ship groove presets built on the step sequencer (rock, ballad, shuffle, bossa), tempo-linked.
 Effort: M
 
@@ -575,7 +575,7 @@ Fix: A pads view with 4 to 8 huge buttons mapped to a pentatonic or chosen chord
 Effort: S
 
 ### [Band director] Chord balance keyboard with per-voice volume and pure toggle
-Evidence: Yamaha's Harmony Director plays chords in just intonation and lets each note's volume and pitch change to demonstrate balance (https://usa.yamaha.com/products/musical_instruments/winds/harmony_directors/index.html). Resonare drones share one volume (`settings.ts:72`).
+Evidence: Yamaha's Harmony Director plays chords in just intonation and lets each note's volume and pitch change to demonstrate balance (https://usa.yamaha.com/products/musical_instruments/winds/harmony_directors/index.html). Partial drones share one volume (`settings.ts:72`).
 Fix: Add `droneVoices: Record<midi, {gain, centsOffset}>`, a projector-friendly chord panel with a gain slider per note and a one-tap "Equal or Pure" switch (using the adaptive just engine), and a bass-heavy "pyramid" balance preset.
 Effort: M
 
@@ -606,7 +606,7 @@ Effort: M
 
 ### [Band director] Per-student profiles on shared devices
 Evidence: Settings live under one localStorage key (`settings.ts:90`).
-Fix: Add `resonare.profiles` holding a list plus the active id. Settings keys and IndexedDB stores get the profile id as a prefix, with a profile switcher protected by the parent lock.
+Fix: Add `partial.profiles` holding a list plus the active id. Settings keys and IndexedDB stores get the profile id as a prefix, with a profile switcher protected by the parent lock.
 Effort: M
 
 ### [Band director] Collect student report files into a class table
@@ -895,8 +895,8 @@ Fix: Measure and publish the total precache size, add a "download everything for
 Effort: S
 
 ### [Market: competitive] Head-to-head comparison page
-Evidence: The README lists features but has no comparison. Resonare's free, local-only model is its main distinguishing claim.
-Fix: Write `docs/compare.md` against TE, Soundcorset and Tunable with each claim sourced and dated, including where Resonare is worse.
+Evidence: The README lists features but has no comparison. Partial's free, local-only model is its main distinguishing claim.
+Fix: Write `docs/compare.md` against TE, Soundcorset and Tunable with each claim sourced and dated, including where Partial is worse.
 Effort: S
 
 ### [Market: contributors] Content contribution format for non-coders

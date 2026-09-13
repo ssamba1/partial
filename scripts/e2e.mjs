@@ -28,7 +28,7 @@ function findBrowser() {
 }
 
 const server = spawn(`npx vite preview --port ${PORT} --strictPort`, { stdio: 'ignore', shell: true });
-const profile = mkdtempSync(join(tmpdir(), 'resonare-e2e-'));
+const profile = mkdtempSync(join(tmpdir(), 'partial-e2e-'));
 const browser = spawn(findBrowser(), [
   '--headless=new',
   `--remote-debugging-port=${DEBUG_PORT}`,
@@ -118,7 +118,7 @@ async function open(hash) {
   await sleep(100);
   await send('Page.navigate', { url: `${BASE}#/${hash}` });
   await sleep(1200);
-  await run(`const k = 'resonare.settings.v1'; const s = JSON.parse(localStorage.getItem(k) || '{}'); if (!s.seenIntro) { s.seenIntro = true; localStorage.setItem(k, JSON.stringify(s)); setTimeout(() => location.reload(), 0); }`);
+  await run(`const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k) || '{}'); if (!s.seenIntro) { s.seenIntro = true; localStorage.setItem(k, JSON.stringify(s)); setTimeout(() => location.reload(), 0); }`);
   await sleep(600);
   // Wait until the screen has actually rendered (and any lazy chunk has loaded) instead of guessing a delay.
   for (let i = 0; i < 60; i++) {
@@ -209,7 +209,7 @@ await check('metronome: a quick double tap leaves it stopped', async () => {
 await check('speed trainer tempo survives other settings writes', async () => {
   await open('metronome');
   const out = await run(`
-    const k = 'resonare.settings.v1';
+    const k = 'partial.settings.v1';
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const s = JSON.parse(localStorage.getItem(k));
     s.metronome = { ...s.metronome, bpm: 240, beatsPerBar: 2, subdivision: 1, accents: ['accent', 'normal'], trainerBars: 1, trainerStep: 5, trainerMax: 300 };
@@ -222,11 +222,11 @@ await check('speed trainer tempo survives other settings writes', async () => {
     // Hammer unrelated settings writes while the trainer is stepping.
     for (let i = 0; i < 25; i++) { document.querySelector('[aria-label="Metronome volume"]').dispatchEvent(new Event('input')); await wait(100); }
     document.querySelector('.play-btn').click(); await wait(200);
-    const saved = JSON.parse(localStorage.getItem('resonare.settings.v1')).metronome;
+    const saved = JSON.parse(localStorage.getItem('partial.settings.v1')).metronome;
     const shown = Number(document.querySelector('.bpm-input').value);
     // restore defaults for later checks
     saved.trainerBars = 0; saved.bpm = 100; saved.beatsPerBar = 4; saved.accents = ['accent','normal','normal','normal'];
-    const all = JSON.parse(localStorage.getItem('resonare.settings.v1')); all.metronome = saved; localStorage.setItem('resonare.settings.v1', JSON.stringify(all));
+    const all = JSON.parse(localStorage.getItem('partial.settings.v1')); all.metronome = saved; localStorage.setItem('partial.settings.v1', JSON.stringify(all));
     return { shown };`);
   // 2.5 s at 240+ BPM in 2/4 is about 2.5 bars per second... expect several +5 steps.
   assert(result.shown >= 255, `tempo only reached ${result.shown}`);
@@ -311,7 +311,7 @@ await check('sheet music: import, annotate, half-page turn', async () => {
     [...document.querySelectorAll('.seg-btn')].find((b) => b.textContent.includes('Half')).click(); await wait(300);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' })); await wait(1200);
     const label = document.querySelector('.page-label').textContent;
-    const strokes = await new Promise((res) => { const q = indexedDB.open('resonare'); q.onsuccess = () => { const g = q.result.transaction('annotations').objectStore('annotations').getAll(); g.onsuccess = () => res(g.result.reduce((n, a) => n + a.strokes.length, 0)); }; });
+    const strokes = await new Promise((res) => { const q = indexedDB.open('partial'); q.onsuccess = () => { const g = q.result.transaction('annotations').objectStore('annotations').getAll(); g.onsuccess = () => res(g.result.reduce((n, a) => n + a.strokes.length, 0)); }; });
     return { label, strokes };`);
   assert(out.strokes >= 1, `strokes ${out.strokes}`);
   assert(out.label.startsWith('1\u00bd'), `label ${out.label}`);
@@ -331,14 +331,14 @@ await check('sheet music remembers the tempo used with a piece', async () => {
     const saved = document.querySelector('.dock-bpm b')?.textContent;
     return saved;`);
   // Change the tempo, reload, reopen the piece.
-  await run(`const k = 'resonare.settings.v1'; const s = JSON.parse(localStorage.getItem(k)); s.metronome.bpm = 157; localStorage.setItem(k, JSON.stringify(s));`);
+  await run(`const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k)); s.metronome.bpm = 157; localStorage.setItem(k, JSON.stringify(s));`);
   await open('sheet');
   const restored = await run(`
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const card = () => [...document.querySelectorAll('.score-card')].find((c) => c.textContent.includes('E2E'));
     for (let i = 0; i < 40 && !card(); i++) await wait(250);
     card().querySelector('.score-open').click(); await wait(1500);
-    return JSON.parse(localStorage.getItem('resonare.settings.v1')).metronome.bpm;`);
+    return JSON.parse(localStorage.getItem('partial.settings.v1')).metronome.bpm;`);
   assert(String(restored) === String(out), `saved ${out}, restored ${restored}`);
   assert(restored !== 157, 'tempo was not restored');
   return `restored ${restored} BPM`;

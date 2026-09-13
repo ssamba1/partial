@@ -3,7 +3,7 @@
 This file lists 139 gaps. I stopped there because anything more would have been padding or a repeat of the existing 78 items. None of it is in `docs/gap-analysis.md`. Where an item builds on an existing one, it says so. Two things I found that bear on existing items:
 
 - **Item 40 has the wrong bundle size.** It called the main bundle "17 KB", but the built `dist/assets/index-BeFWkRDq.js` is 127,277 bytes raw and 45,477 bytes gzipped at level 9 (rebuilt and measured with Node zlib on 2026-09-13; Vite reports 45.85 kB). Item 40 has been corrected.
-- **The design spec is out of date.** `docs/superpowers/specs/2026-09-12-resonare-design.md` lists "pitch-shifting of recordings" as not implemented, while README:59-61 and `recorder.ts:282` show it is.
+- **The design spec is out of date.** `docs/superpowers/specs/2026-09-12-partial-design.md` lists "pitch-shifting of recordings" as not implemented, while README:59-61 and `recorder.ts:282` show it is.
 
 Checked on the web this session:
 - GitHub Pages cannot send custom headers: [community #54257](https://github.com/orgs/community/discussions/54257)
@@ -14,7 +14,7 @@ Checked on the web this session:
 - Apple developer fee $99 a year: [Apple](https://developer.apple.com/programs/whats-included/)
 - Google Play fee $25, one time: secondary sources only ([example](https://primetestlab.com/blog/google-play-developer-fee))
 - Bubblewrap and assetlinks.json: [Bubblewrap README](https://github.com/GoogleChromeLabs/bubblewrap/blob/main/packages/cli/README.md)
-- An App Store app is already called "Resonare": [App Store listing](https://apps.apple.com/us/app/resonare/id6752107210), and resonare.app is taken. I saw these in search results but did not open the pages.
+- An App Store app is already called "Resonare": [App Store listing](https://apps.apple.com/us/app/resonare/id6752107210), and resonare.app is taken (the app has since been renamed to Partial). I saw these in search results but did not open the pages.
 
 Anything else from outside the repo is marked [unverified].
 
@@ -104,7 +104,7 @@ Effort: S
 
 ### No Media Session integration
 Evidence: grep finds no `mediaSession` in `src`. Headset buttons, lock-screen controls and keyboard media keys cannot start or stop the metronome or drones.
-Fix: when the metronome starts, set `navigator.mediaSession.metadata = new MediaMetadata({title: '100 BPM 4/4', artist: 'Resonare'})` and the `play`/`pause`/`stop` handlers mapped to `metronome.start/stop`. Update `playbackState` in `metronome.onState`. Note: Media Session UI may need an actual media element on some platforms [unverified].
+Fix: when the metronome starts, set `navigator.mediaSession.metadata = new MediaMetadata({title: '100 BPM 4/4', artist: 'Partial'})` and the `play`/`pause`/`stop` handlers mapped to `metronome.start/stop`. Update `playbackState` in `metronome.onState`. Note: Media Session UI may need an actual media element on some platforms [unverified].
 Effort: S
 
 ### Recorder decodes whole takes into memory on the live context
@@ -161,7 +161,7 @@ Effort: S
 
 ### Only one tab should own the mic and audio
 Evidence: nothing coordinates tabs. Two tabs can each run a metronome and hold the mic. `db.ts:58-62` already tells users to "Close that tab" when a version upgrade is blocked.
-Fix: use `BroadcastChannel('resonare')`. When a tab starts audio it posts `claim`, and other tabs stop their metronome, drones and trackers and show "Playing in another tab". Also add `"launch_handler": {"client_mode": "focus-existing"}` to the manifest.
+Fix: use `BroadcastChannel('partial')`. When a tab starts audio it posts `claim`, and other tabs stop their metronome, drones and trackers and show "Playing in another tab". Also add `"launch_handler": {"client_mode": "focus-existing"}` to the manifest.
 Effort: S
 
 ## C. Bundle, build and loading performance
@@ -255,7 +255,7 @@ Effort: S
 
 ### No iOS standalone meta tags or launch images
 Evidence: `index.html` has no `apple-mobile-web-app-status-bar-style`, `apple-mobile-web-app-title` or `apple-touch-startup-image`, and uses `viewport-fit=cover` (`:5`).
-Fix: add `<meta name="apple-mobile-web-app-title" content="Resonare">` and `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`. Generate launch images with `@vite-pwa/assets-generator` (it emits the per-device `media` queries). Check the safe-area padding in `styles.css` on a notched iPhone.
+Fix: add `<meta name="apple-mobile-web-app-title" content="Partial">` and `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`. Generate launch images with `@vite-pwa/assets-generator` (it emits the per-device `media` queries). Check the safe-area padding in `styles.css` on a notched iPhone.
 Effort: S
 
 ### No way to open or receive PDFs from the OS
@@ -270,7 +270,7 @@ Effort: S
 
 ### No explainer before the microphone permission prompt
 Evidence: `context.ts:44` calls `getUserMedia` straight from the tuner tap. On iOS a denial is hard to undo (Settings > Safari) [unverified exact flow].
-Fix: the first time the mic is requested (new setting `micExplained`), show a sheet: "Resonare listens only on this device to detect pitch. Nothing is recorded or sent." with a Continue button, then call `getUserMedia`. If denied, show platform-specific steps.
+Fix: the first time the mic is requested (new setting `micExplained`), show a sheet: "Partial listens only on this device to detect pitch. Nothing is recorded or sent." with a Continue button, then call `getUserMedia`. If denied, show platform-specific steps.
 Effort: S
 
 ### MIDI permission may be requested at startup without a gesture
@@ -327,7 +327,7 @@ Effort: S
 
 ### Activate deletes other apps' caches on a shared origin
 Evidence: `sw.js:27-29` deletes every cache whose key is not `CACHE`. On GitHub Pages project sites, every repo of that user shares the origin `username.github.io`, so this wipes other projects' caches.
-Fix: `keys.filter(k => k.startsWith('resonare-') && k !== CACHE)`.
+Fix: `keys.filter(k => k.startsWith('partial-') && k !== CACHE)`.
 Effort: S
 
 ### No tests for service worker update, failure or eviction
@@ -581,7 +581,7 @@ Effort: S
 
 ### Stale lazy chunk after a deploy has no recovery
 Evidence: `main.ts:30-40` shows "Could not load the sheet music reader. Check your connection and reload." when the dynamic import fails. After a deploy that removed the old `sheetmusic-*.js`, reloading is the fix, but the message blames the connection.
-Fix: listen for `window.addEventListener('vite:preloadError', ...)` and catch the import. If `navigator.onLine`, check `registration.waiting` or `installing` and reload once (guard with `sessionStorage.resonareReloaded`), otherwise show the offline message.
+Fix: listen for `window.addEventListener('vite:preloadError', ...)` and catch the import. If `navigator.onLine`, check `registration.waiting` or `installing` and reload once (guard with `sessionStorage.partialReloaded`), otherwise show the offline message.
 Effort: S
 
 ### A throwing view blanks the app with no way out
@@ -639,12 +639,12 @@ Fix: add `bug.yml` (required fields: device, OS and version, browser and version
 Effort: S
 
 ### Development tool files are committed
-Evidence: `git ls-files` includes `.claude/launch.json` and `docs/superpowers/specs/2026-09-12-resonare-design.md`.
+Evidence: `git ls-files` includes `.claude/launch.json` and `docs/superpowers/specs/2026-09-12-partial-design.md`.
 Fix: decide whether these belong in the public repo. If not, `git rm --cached .claude/launch.json` and add `.claude/` to `.gitignore`. Move the design spec to `docs/architecture.md` (next item) or delete it.
 Effort: S
 
 ### Architecture doc is stale and misnamed
-Evidence: `docs/superpowers/specs/2026-09-12-resonare-design.md` still lists "pitch-shifting of recordings" as not implemented, which contradicts README:59-61 and `recorder.ts:282`.
+Evidence: `docs/superpowers/specs/2026-09-12-partial-design.md` still lists "pitch-shifting of recordings" as not implemented, which contradicts README:59-61 and `recorder.ts:282`.
 Fix: rewrite it as `docs/architecture.md` covering:
 - the audio graph (master, drones, clicks)
 - the scheduler clocks
@@ -677,7 +677,7 @@ Effort: S
 
 ### The core DSP is not reusable as a package
 Evidence: `src/core` (YIN, temperaments, rhythm, WSOLA) has no DOM dependency per README:144, but it is not published. Other developers are more likely to contribute to a library they can use.
-Fix: make an npm workspace `packages/core` with its own `package.json` (`@resonare/core`, MIT, `exports`, `types`) built with `tsc`, and publish with `npm publish --provenance` from CI. Changes the import paths in `src/` only.
+Fix: make an npm workspace `packages/core` with its own `package.json` (`@partial/core`, MIT, `exports`, `types`) built with `tsc`, and publish with `npm publish --provenance` from CI. Changes the import paths in `src/` only.
 Effort: M
 
 ### No contributor onboarding structure
@@ -698,7 +698,7 @@ Fix: host on a provider that supports a `_headers` file, such as Cloudflare Page
 Effort: S
 
 ### Pick the permanent origin before launch
-Evidence: all user data lives in origin-scoped storage (`settings.ts:202`, `db.ts:40`). Moving from `x.github.io/resonare` to a custom domain later strands every user's recordings, scores and history.
+Evidence: all user data lives in origin-scoped storage (`settings.ts:202`, `db.ts:40`). Moving from `x.github.io/partial` to a custom domain later strands every user's recordings, scores and history.
 Fix: buy the domain now [unverified cost, depends on TLD and registrar] and deploy only there. If a move is ever unavoidable, ship a one-time "export all" on the old origin (needs item 51's full backup) and an import prompt on the new one.
 Effort: S
 
@@ -742,7 +742,8 @@ Effort: S
 ## M. Legal
 
 ### The name "Resonare" is already used by a music app
-Evidence: search results list an App Store app named "Resonare" (id6752107210, an album-logging app by James Shultz) and the resonare.app domain. I saw these as search results and did not open the pages. The design spec calls "Resonare" a "working name". No trademark search has been done.
+Status: addressed on 2026-09-13 by renaming the app to Partial. Web searches found no app named Partial and no DNS records for partial.app or partial.dev. No trademark search has been done, so the fix below still applies to the new name.
+Evidence: search results list an App Store app named "Resonare" (id6752107210, an album-logging app by James Shultz) and the resonare.app domain. I saw these as search results and did not open the pages. No trademark search has been done.
 Fix: search USPTO (tmsearch.uspto.gov), EUIPO eSearch and WIPO Global Brand Database for the word in classes 9 and 41. Check both app stores and domain availability. An identical name in the same store category is a listing-conflict risk even without a registered mark [not legal advice]. Decide on a name before registering the domain, the TWA package id or store listings, all of which are costly to change later.
 Effort: S
 

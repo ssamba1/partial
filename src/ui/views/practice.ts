@@ -233,7 +233,7 @@ export function mountPractice(root: HTMLElement) {
               class: 'pill-btn',
               onclick: () => {
                 const blob = new Blob([JSON.stringify(getSettings(), null, 2)], { type: 'application/json' });
-                const a = h('a', { href: URL.createObjectURL(blob), download: `resonare-backup-${dayKey(new Date())}.json` });
+                const a = h('a', { href: URL.createObjectURL(blob), download: `partial-backup-${dayKey(new Date())}.json` });
                 a.click();
                 setTimeout(() => URL.revokeObjectURL(a.href), 1000);
               },
@@ -255,7 +255,7 @@ export function mountPractice(root: HTMLElement) {
                   rows.push([d, (st.practiceLog[d] / 60).toFixed(1), ...cols.map((c) => ((acts[c] ?? 0) / 60).toFixed(1))].join(','));
                 }
                 const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
-                const a = h('a', { href: URL.createObjectURL(blob), download: `resonare-practice-${dayKey(new Date())}.csv` });
+                const a = h('a', { href: URL.createObjectURL(blob), download: `partial-practice-${dayKey(new Date())}.csv` });
                 a.click();
                 setTimeout(() => URL.revokeObjectURL(a.href), 1000);
               },
@@ -282,7 +282,7 @@ export function mountPractice(root: HTMLElement) {
                   applyTheme();
                   toast('Backup restored');
                 } catch {
-                  toast('That file is not a Resonare backup');
+                  toast('That file is not a Partial backup');
                 }
               },
             }),
@@ -303,7 +303,7 @@ export function mountPractice(root: HTMLElement) {
           ),
         ),
       ),
-      h('p', { class: 'fineprint' }, 'Resonare is free and open source under the MIT license. No accounts, no ads, no tracking. An independent project, not affiliated with TonalEnergy.'),
+      h('p', { class: 'fineprint' }, 'Partial is free and open source under the MIT license. No accounts, no ads, no tracking. An independent project, not affiliated with TonalEnergy.'),
     );
   }
 

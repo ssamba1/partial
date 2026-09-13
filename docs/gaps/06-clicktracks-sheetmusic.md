@@ -648,7 +648,7 @@ Evidence: every import gets a new `uid()` (`sheetmusic.ts:109`).
 Fix: hash the file (`crypto.subtle.digest('SHA-256', data)`), store it as `hash`, and offer "Already in library: open it or import a copy".
 Effort: S
 
-### [Sheet music] Other apps can't send PDFs to Resonare
+### [Sheet music] Other apps can't send PDFs to Partial
 Evidence: `manifest.webmanifest` has no `share_target` or `file_handlers`.
 Fix: add `share_target` (POST multipart with accept `application/pdf`), handled in `sw.js`, which stashes the file and redirects to `#/sheet`. Add `file_handlers` with `launchQueue` for desktop Chromium. Browser support differs and needs checking [unverified].
 Effort: M
@@ -755,7 +755,7 @@ Effort: S
 
 ### [Sheet music] Two tabs overwrite each other's annotations
 Evidence: `saveInk` writes a page's whole stroke list (`sheetmusic.ts:424`). Two open tabs on the same score keep overwriting each other.
-Fix: `BroadcastChannel('resonare-ink')` messages on each save. Other tabs merge by stroke id (add `id` to `Stroke`) or reload that page with a notice.
+Fix: `BroadcastChannel('partial-ink')` messages on each save. Other tabs merge by stroke id (add `id` to `Stroke`) or reload that page with a notice.
 Effort: S
 
 ### [Sheet music] Can't view two scores side by side

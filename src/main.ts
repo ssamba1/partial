@@ -68,7 +68,7 @@ const navLink = (r: AppRoute, cls: string) =>
 const rail = h(
   'nav',
   { class: 'rail', 'aria-label': 'Sections' },
-  h('a', { class: 'rail-brand', href: '#/tuner', 'aria-label': 'Resonare home' }, h('span', { class: 'logo-mark', 'aria-hidden': 'true' }), h('span', null, 'Resonare')),
+  h('a', { class: 'rail-brand', href: '#/tuner', 'aria-label': 'Partial home' }, h('span', { class: 'logo-mark', 'aria-hidden': 'true' }), h('span', null, 'Partial')),
   h('div', { class: 'rail-group' }, routes.filter((r) => r.primary).map((r) => navLink(r, 'rail-link'))),
   h('div', { class: 'rail-label' }, 'Practice tools'),
   h('div', { class: 'rail-group' }, routes.filter((r) => !r.primary).map((r) => navLink(r, 'rail-link'))),
@@ -221,7 +221,7 @@ restoreMidi();
 if (!getSettings().seenIntro) {
   const point = (name: IconName, head: string, text: string) => h('div', { class: 'intro-point' }, h('span', { class: 'intro-icon' }, icon(name, 22)), h('div', null, h('b', null, head), h('p', null, text)));
   openSheet(
-    'Welcome to Resonare',
+    'Welcome to Partial',
     h(
       'div',
       { class: 'stack' },

@@ -50,7 +50,7 @@ instead of padding, and that is why the total is short.
   count, not an exact figure.
 - **Overlap with the original 78 was not checked item by item.** Each audit
   pass was told to skip anything already in `gap-analysis.md`, and many items
-  say which existing item they build on. I did not compare all 1,322 against
+  say which existing item they build on. Claude did not compare all 1,322 against
   the 78 myself.
 - **Code bugs come from reading source, mostly not from running it.** A few
   were reproduced (the files say which). Treat the rest as strong leads.
@@ -64,7 +64,7 @@ instead of padding, and that is why the total is short.
 - `gap-analysis.md` item 40 called the main bundle 17 KB. A fresh build on
   2026-09-13 gives `dist/assets/index-BeFWkRDq.js` at 127,277 bytes, 45,477
   bytes gzipped at level 9 (Node zlib). Fixed.
-- `docs/superpowers/specs/2026-09-12-resonare-design.md` still lists pitch
+- `docs/superpowers/specs/2026-09-12-partial-design.md` still lists pitch
   shifting of recordings as not built, but it is (`src/ui/views/recorder.ts`).
   Fixed.
 

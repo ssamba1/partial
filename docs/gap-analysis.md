@@ -1,4 +1,4 @@
-# Resonare vs TE Tuner: gaps and how to close each one
+# Partial vs TE Tuner: gaps and how to close each one
 
 Written 2026-09-13 against commit `b040ec6`.
 
@@ -24,7 +24,7 @@ Effort: **S** is under a day, **M** a few days, **L** a week or more,
 
 ---
 
-## Part 1. Things TE has that Resonare does not
+## Part 1. Things TE has that Partial does not
 
 ### Metronome
 
@@ -57,7 +57,7 @@ Effort: **S** is under a day, **M** a few days, **L** a week or more,
    1. Wrap the app with Tauri (desktop) or Capacitor (mobile).
    2. Add a native plugin that links the Link C++ library and exposes
       `{tempo, beat, phase, peers}` to the web layer.
-   3. Licensing: Resonare is MIT. Linking GPL code into the distributed native
+   3. Licensing: Partial is MIT. Linking GPL code into the distributed native
       binary makes that binary GPL. Either ship the native wrapper under GPL
       (the web app can stay MIT) or ask Ableton for the proprietary license.
       This is a decision for you, not a coding task.
@@ -253,7 +253,7 @@ Effort: **S** is under a day, **M** a few days, **L** a week or more,
 
 28. **Recording the app's own sounds** (speaker icon on sound pages)
     [TE guide]. Solution: a `MediaStreamAudioDestinationNode` connected from the
-    master gain; record its stream with `MediaRecorder`; label takes "Resonare
+    master gain; record its stream with `MediaRecorder`; label takes "Partial
     output". Effort: S.
 
 29. **Export and share of presets, exercises and recordings** [TE guide].
@@ -261,7 +261,7 @@ Effort: **S** is under a day, **M** a few days, **L** a week or more,
     the system share sheet [our code].
     Solution: `navigator.share({ files })` when `navigator.canShare` accepts the
     file, falling back to download. For presets and click tracks, export a small
-    `.resonare.json` and accept it through the file input and a drop zone.
+    `.partial.json` and accept it through the file input and a drop zone.
     Effort: S.
 
 30. **Sound level mixer with per-source volume, pan and input monitoring**
@@ -289,7 +289,7 @@ Effort: **S** is under a day, **M** a few days, **L** a week or more,
     draws a fading circle at each `pointerdown` in a fixed overlay. Effort: S.
 
 34. **Education and teacher features** (TE for Education) [TE desktop page].
-    Resonare has no accounts by design.
+    Partial has no accounts by design.
     Solution without a backend: shareable assignment links that encode a click
     track, exercise or preset in the URL fragment (base64 JSON, never sent to a
     server since fragments are not). Students open the link and the item is
@@ -380,7 +380,7 @@ Effort: **S** is under a day, **M** a few days, **L** a week or more,
 
 ---
 
-## Part 3. What both TE and Resonare do badly
+## Part 3. What both TE and Partial do badly
 
 44. **Vibrato makes the needle wander.** TE reviews call its display "jumpy" on
     sustained notes [TE reviews]. Our steadiness modes smooth noise but still
@@ -490,7 +490,7 @@ Effort: **S** is under a day, **M** a few days, **L** a week or more,
 
 ---
 
-## Part 4. Resonare's own gaps (not about TE)
+## Part 4. Partial's own gaps (not about TE)
 
 ### Verification
 

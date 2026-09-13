@@ -16,7 +16,7 @@ export function startRouter(routes: Route[], outlet: HTMLElement, onChange: (rou
     outlet.replaceChildren();
     outlet.scrollTop = 0;
     cleanup = route.mount(outlet);
-    document.title = `${route.label} · Resonare`;
+    document.title = `${route.label} · Partial`;
     onChange(route);
   };
 
