@@ -20,6 +20,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: End-to-end checks in headless Chrome
+        run: node scripts/e2e.mjs
       - uses: actions/upload-pages-artifact@v5
         if: github.event_name == 'push'
         with:

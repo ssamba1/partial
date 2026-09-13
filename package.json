@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "e2e": "vite build && node scripts/e2e.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
