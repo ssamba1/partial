@@ -354,7 +354,8 @@ Effort: **S** is under a day, **M** a few days, **L** a week or more,
        example the Salamander Grand Piano) before using it [unverified license].
     3. Drones: record long tones from real players (cello, clarinet, voice) and
        loop a steady section with crossfade.
-    4. Keep samples lazy-loaded to protect the 17 KB main bundle.
+    4. Keep samples lazy-loaded to protect the main bundle (127 KB raw, about
+       46 KB gzipped, measured on 2026-09-13).
     Effort: L.
 
 41. **Maturity of interaction polish.** TE has had many releases of refinement;

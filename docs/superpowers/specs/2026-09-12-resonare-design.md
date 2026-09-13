@@ -16,7 +16,8 @@ repositories. Visual assets were not copied; interaction ideas were.
 - No native wrappers yet. `src/core` is framework-free so a Capacitor or Tauri
   shell can be added later.
 - Not implemented: Ableton Link (no browser API), spoken count-in (no recorded
-  voice), pitch-shifting of recordings, Apple Watch.
+  voice), Apple Watch. (Pitch shifting of recordings was listed here but is
+  built: `src/ui/views/recorder.ts` transposes a take by semitones.)
 
 ## Architecture
 
