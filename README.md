@@ -1,10 +1,12 @@
 # Resonare
 
-A free, open-source practice studio for musicians: tuner, metronome, drones,
-exercise player, click tracks, recorder with intonation reports, pitch analysis
-and a sheet music reader with annotation, in one installable web app. No
-accounts, no ads, no subscriptions, no tracking. Everything you save stays on
-your device.
+Resonare is a free, open-source practice app for musicians. It has a tuner, a
+metronome, drones and an exercise player, click tracks, a recorder that checks
+your intonation, pitch analysis, and a sheet music reader you can write on. It
+runs in the browser and can be installed like an app.
+
+You don't need an account, and nothing costs money. The app has no ads or
+tracking, and everything you save stays on your own device.
 
 Resonare is an independent project and is not affiliated with TonalEnergy.
 
@@ -106,10 +108,11 @@ The synthesized microphone is an electrical signal, so it cannot show that the
 tuner ignores metronome clicks picked up acoustically; only the timing logic for
 that is unit tested.
 
-Not yet measured: accuracy on real instruments through real microphones, audio
-latency on phones, and behaviour on Safari and Firefox. The timbres and click
-sounds are synthesized approximations, not recorded samples. Ableton Link and
-spoken count-ins are not implemented.
+What I have not measured yet: accuracy with real instruments and microphones,
+audio latency on phones, and whether anything breaks in Safari or Firefox (all
+browser testing so far used Chrome and Edge). The timbres and click sounds are
+synthesized approximations rather than recordings. Ableton Link and spoken
+count-ins are missing.
 
 ## Development
 
