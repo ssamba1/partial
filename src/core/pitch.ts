@@ -21,6 +21,10 @@ export function rms(frame: ArrayLike<number>): number {
   return Math.sqrt(sum / frame.length);
 }
 
+// Reused between calls so the tuner allocates nothing per frame.
+let scratchDiff = new Float32Array(0);
+let scratchCmnd = new Float32Array(0);
+
 /**
  * YIN pitch detector (de Cheveigne & Kawahara, 2002) with parabolic
  * interpolation of the chosen lag. Returns null for silence or frames with no
@@ -42,8 +46,21 @@ export function detectPitch(frame: Float32Array, opts: PitchOptions): PitchResul
   maxTau = Math.min(maxTau, Math.floor(frame.length / 2));
   if (maxTau <= minTau + 2) return null;
   const window = frame.length - maxTau;
+  if (scratchDiff.length < maxTau + 2) {
+    scratchDiff = new Float32Array(maxTau + 2);
+    scratchCmnd = new Float32Array(maxTau + 2);
+  }
+  const diff = scratchDiff;
+  const cmnd = scratchCmnd;
 
-  const diff = new Float32Array(maxTau + 1);
+  // Difference function and cumulative mean normalised difference, computed one
+  // lag at a time so we can stop just past the first dip below the threshold.
+  // For most notes that is a small fraction of the lags, which keeps the tuner
+  // light enough to run every animation frame on a phone.
+  cmnd[0] = 1;
+  let running = 0;
+  let candidate = -1;
+  let tauEstimate = -1;
   for (let tau = 1; tau <= maxTau; tau++) {
     let sum = 0;
     for (let i = 0; i < window; i++) {
@@ -51,25 +68,18 @@ export function detectPitch(frame: Float32Array, opts: PitchOptions): PitchResul
       sum += d * d;
     }
     diff[tau] = sum;
-  }
+    running += sum;
+    cmnd[tau] = running === 0 ? 1 : (sum * tau) / running;
 
-  // Cumulative mean normalized difference.
-  const cmnd = new Float32Array(maxTau + 1);
-  cmnd[0] = 1;
-  let running = 0;
-  for (let tau = 1; tau <= maxTau; tau++) {
-    running += diff[tau];
-    cmnd[tau] = running === 0 ? 1 : (diff[tau] * tau) / running;
-  }
-
-  let tauEstimate = -1;
-  for (let tau = minTau; tau <= maxTau; tau++) {
-    if (cmnd[tau] < threshold) {
-      while (tau + 1 <= maxTau && cmnd[tau + 1] < cmnd[tau]) tau++;
-      tauEstimate = tau;
+    if (candidate === -1) {
+      if (tau >= minTau && cmnd[tau] < threshold) candidate = tau;
+    } else if (cmnd[tau] >= cmnd[tau - 1]) {
+      // The dip bottomed out at the previous lag; diff[tau] is already there for interpolation.
+      tauEstimate = tau - 1;
       break;
     }
   }
+  if (candidate !== -1 && tauEstimate === -1) tauEstimate = maxTau;
   if (tauEstimate === -1) return null;
 
   let betterTau = tauEstimate;

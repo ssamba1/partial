@@ -102,7 +102,7 @@ export function mountTuner(root: HTMLElement) {
 
   /* ----- Display elements ----- */
   const ring = createPitchRing();
-  const noteEl = h('span', { class: 'big-note' }, '·');
+  const noteEl = h('span', { class: 'big-note' });
   const accidentalEl = h('span', { class: 'big-acc' });
   const octaveEl = h('span', { class: 'big-oct' });
   const centsEl = h('div', { class: 'big-cents' }, '');
@@ -111,7 +111,7 @@ export function mountTuner(root: HTMLElement) {
 
   const barNeedle = h('div', { class: 'bar-needle' });
   const barZone = h('div', { class: 'bar-zone' });
-  const barNote = h('div', { class: 'bar-note' }, '·');
+  const barNote = h('div', { class: 'bar-note' }, 'Play a note');
   const barCents = h('div', { class: 'bar-cents' });
   const barMeter = h(
     'div',
@@ -124,7 +124,7 @@ export function mountTuner(root: HTMLElement) {
 
   /* ----- Strobe display ----- */
   const strobeCanvas = h('canvas', { class: 'strobe-canvas', 'aria-hidden': 'true' });
-  const strobeNote = h('div', { class: 'bar-note' }, '·');
+  const strobeNote = h('div', { class: 'bar-note' }, 'Play a note');
   const strobeCents = h('div', { class: 'bar-cents' });
   const strobeView = h(
     'div',

@@ -1022,6 +1022,15 @@ button.link {
   font-size: 0.8rem;
   margin: 18px 0 6px;
 }
+@media (hover: none) and (pointer: coarse) {
+  .hint-line:has(kbd) {
+    display: none;
+  }
+}
+.tuner:not(.has-note) .bar-note {
+  font-size: 1.5rem;
+  color: var(--muted);
+}
 .fineprint {
   color: var(--faint);
   font-size: 0.78rem;
@@ -1336,7 +1345,8 @@ button.link {
   fill: var(--good);
 }
 .hold-track {
-  fill: color-mix(in srgb, var(--state-soft, transparent) 60%, transparent);
+  /* A clean surface with a faint wash of the state colour, so dark mode never turns muddy. */
+  fill: color-mix(in srgb, var(--state, var(--surface)) 3%, var(--surface));
   stroke: var(--line);
   stroke-width: 3;
   transition: fill 300ms;
@@ -1349,7 +1359,7 @@ button.link {
   transition: stroke-dasharray 120ms linear;
 }
 .pitch-ring.locked .hold-track {
-  fill: color-mix(in srgb, var(--good) 22%, transparent);
+  fill: color-mix(in srgb, var(--good) 16%, var(--surface));
 }
 .pitch-ring.locked {
   animation: lock-pulse 900ms var(--ease);

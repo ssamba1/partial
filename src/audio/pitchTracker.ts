@@ -48,6 +48,7 @@ export class PitchTracker {
   private listeners = new Set<(f: TrackerFrame) => void>();
   private last: { note: NoteReading; frequency: number; clarity: number; at: number } | null = null;
   private displayCents = 0;
+  private frameCount = 0;
   running = false;
 
   constructor(private opts: TrackerOptions) {}
@@ -83,7 +84,11 @@ export class PitchTracker {
       let held = false;
       let level = rms(this.buffer);
 
-      if (!gated) {
+      // With no pitch present (room noise), analyse every other frame to save battery; a new note is still caught within ~33 ms.
+      this.frameCount++;
+      const idle = !this.last && this.frameCount % 2 === 1;
+
+      if (!gated && !idle) {
         const result = detectPitch(this.buffer, { sampleRate: ctx.sampleRate, minRms: this.opts.sensitivity?.() ?? 0.008 });
         this.smoother.setSize(damping.median);
         frequency = this.smoother.push(result?.frequency ?? null);
