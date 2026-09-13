@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { angleDelta, dialSteps, holdRepeatDelay, nearClick, pointAngle } from '../src/core/gestures';
 import { nearestString, STRING_INSTRUMENTS, stringFrequency } from '../src/core/instruments';
 import { DEFAULT_TUNING, ratioToCents } from '../src/core/notes';
+import { midiTrigger, triggerLabel } from '../src/core/midi';
 import { staffNote } from '../src/core/staff';
 
 const byId = (id: string) => STRING_INSTRUMENTS.find((i) => i.id === id)!;
@@ -63,6 +64,19 @@ describe('gestures', () => {
     expect(nearClick(0.995, [1])).toBe(true);
     expect(nearClick(1.2, [1])).toBe(false);
     expect(nearClick(0.5, [])).toBe(false);
+  });
+});
+
+describe('midi triggers', () => {
+  it('note on, note off, control change', () => {
+    expect(midiTrigger([0x90, 60, 100])).toBe('note:60');
+    expect(midiTrigger([0x93, 60, 100])).toBe('note:60');
+    expect(midiTrigger([0x90, 60, 0])).toBeNull(); // note on with velocity 0 is a note off
+    expect(midiTrigger([0x80, 60, 64])).toBeNull();
+    expect(midiTrigger([0xb0, 64, 127])).toBe('cc:64');
+    expect(midiTrigger([0xb0, 64, 10])).toBeNull();
+    expect(midiTrigger([0xf8])).toBeNull();
+    expect(triggerLabel('cc:64')).toBe('Controller 64');
   });
 });
 

@@ -1,4 +1,5 @@
 import type { Tendencies } from '../core/intonation';
+import type { MidiAction } from '../core/midi';
 import { setNotation, type Notation, type Temperament } from '../core/notes';
 import { dayKey } from '../core/practice';
 import type { AccentLevel, ClickTrack } from '../core/rhythm';
@@ -77,6 +78,11 @@ export interface Settings {
   activityLog: Record<string, Partial<Record<Activity, number>>>;
   dailyGoalMinutes: number;
   seenIntro: boolean;
+  /** MIDI trigger key ("note:60", "cc:64") to action. */
+  midiMap: Record<string, MidiAction>;
+  midiEnabled: boolean;
+  /** Announce tuner readings through a live region for screen readers. */
+  announce: boolean;
 }
 
 const KEY = 'resonare.settings.v1';
@@ -126,6 +132,9 @@ export const DEFAULT_SETTINGS: Settings = {
   activityLog: {},
   dailyGoalMinutes: 30,
   seenIntro: false,
+  midiMap: {},
+  midiEnabled: false,
+  announce: false,
 };
 
 function safeParse(raw: string | null): Partial<Settings> {

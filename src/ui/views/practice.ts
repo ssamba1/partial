@@ -1,6 +1,8 @@
 import { bestStreak, dayKey, streak } from '../../core/practice';
 import { getSettings, mergeSettings, subscribeSettings, updateSettings, type Activity } from '../../store/settings';
-import { segmented, svgEl, toast } from '../components';
+import { MIDI_ACTIONS, triggerLabel } from '../../core/midi';
+import { iconButton, segmented, svgEl, toast } from '../components';
+import { disableMidi, enableMidi, learnNextTrigger, onMidiDevices } from '../controls';
 import { h } from '../dom';
 import { icon, type IconName } from '../icons';
 
@@ -48,11 +50,93 @@ function rings(today: Partial<Record<Activity, number>>, total: number, goalSec:
   return svg;
 }
 
+function midiCard(): { el: HTMLElement; dispose: () => void } {
+  const devices = h('div', { class: 'muted small' });
+  const rows = h('div', { class: 'midi-rows' });
+  const enable = h('input', {
+    type: 'checkbox',
+    role: 'switch',
+    checked: getSettings().midiEnabled,
+    onchange: async (e: Event) => {
+      const on = (e.target as HTMLInputElement).checked;
+      if (on && !(await enableMidi())) {
+        (e.target as HTMLInputElement).checked = false;
+        return;
+      }
+      if (!on) disableMidi();
+      updateSettings({ midiEnabled: on });
+      draw();
+    },
+  });
+
+  function draw() {
+    const map = getSettings().midiMap;
+    rows.hidden = !getSettings().midiEnabled;
+    rows.replaceChildren(
+      ...MIDI_ACTIONS.map((a) => {
+        const assigned = Object.entries(map).find(([, act]) => act === a.id)?.[0];
+        const learnBtn = h('button', { class: 'chip' }, assigned ? triggerLabel(assigned) : 'Learn');
+        learnBtn.addEventListener('click', () => {
+          learnBtn.textContent = 'Press a pedal or key…';
+          learnBtn.classList.add('on');
+          learnNextTrigger((trigger) => {
+            updateSettings((s) => {
+              const next = Object.fromEntries(Object.entries(s.midiMap).filter(([k, act]) => act !== a.id && k !== trigger));
+              return { midiMap: { ...next, [trigger]: a.id } };
+            });
+            toast(`${a.label}: ${triggerLabel(trigger)}`);
+            draw();
+          });
+        });
+        return h(
+          'div',
+          { class: 'midi-row' },
+          h('span', null, a.label),
+          h(
+            'div',
+            { class: 'row tight' },
+            learnBtn,
+            assigned
+              ? iconButton('close', `Clear ${a.label}`, () => {
+                  updateSettings((s) => ({ midiMap: Object.fromEntries(Object.entries(s.midiMap).filter(([, act]) => act !== a.id)) }));
+                  draw();
+                }, 'tool-btn plain')
+              : null,
+          ),
+        );
+      }),
+    );
+  }
+
+  const off = onMidiDevices((names) => {
+    devices.textContent = getSettings().midiEnabled ? (names.length ? `Connected: ${names.join(', ')}` : 'No MIDI devices found yet. Plug one in and it appears here.') : '';
+  });
+  draw();
+  const card = h(
+    'div',
+    { class: 'card' },
+    h('h3', null, 'Pedals and MIDI'),
+    h('p', { class: 'muted small' }, 'Bluetooth page turners that type arrow keys work without setup. For MIDI pedals and controllers, turn this on and assign a control to each action.'),
+    h('label', { class: 'switch-row' }, h('span', null, h('strong', null, 'Use MIDI devices'), devices), enable),
+    rows,
+  );
+  return {
+    el: card,
+    dispose: () => {
+      off();
+      learnNextTrigger(null);
+    },
+  };
+}
+
 export function mountPractice(root: HTMLElement) {
   const view = h('section', { class: 'view practice' });
   root.append(view);
+  let midi = midiCard();
 
   function render() {
+    midi.dispose();
+    midi = midiCard();
     const s = getSettings();
     const todayKey = dayKey(new Date());
     const todaySec = s.practiceLog[todayKey] ?? 0;
@@ -123,6 +207,18 @@ export function mountPractice(root: HTMLElement) {
           'Theme',
         ),
       ),
+      midi.el,
+      h(
+        'div',
+        { class: 'card' },
+        h('h3', null, 'Accessibility'),
+        h(
+          'label',
+          { class: 'switch-row' },
+          h('span', null, h('strong', null, 'Announce tuner readings'), h('small', null, 'Screen readers hear the note and how far off it is, at most every second and a half.')),
+          h('input', { type: 'checkbox', role: 'switch', checked: s.announce, onchange: (e: Event) => updateSettings({ announce: (e.target as HTMLInputElement).checked }) }),
+        ),
+      ),
       h(
         'div',
         { class: 'card' },
@@ -144,6 +240,28 @@ export function mountPractice(root: HTMLElement) {
             },
             icon('download', 16),
             'Export backup',
+          ),
+          h(
+            'button',
+            {
+              class: 'pill-btn',
+              onclick: () => {
+                const st = getSettings();
+                const days = Object.keys(st.practiceLog).sort();
+                const cols: Activity[] = ['tuner', 'metronome', 'sound', 'record', 'analysis'];
+                const rows = [['date', 'total_minutes', ...cols.map((c) => `${c}_minutes`)].join(',')];
+                for (const d of days) {
+                  const acts = st.activityLog[d] ?? {};
+                  rows.push([d, (st.practiceLog[d] / 60).toFixed(1), ...cols.map((c) => ((acts[c] ?? 0) / 60).toFixed(1))].join(','));
+                }
+                const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+                const a = h('a', { href: URL.createObjectURL(blob), download: `resonare-practice-${dayKey(new Date())}.csv` });
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+              },
+            },
+            icon('download', 16),
+            'Practice log (CSV)',
           ),
           h(
             'label',
@@ -191,10 +309,14 @@ export function mountPractice(root: HTMLElement) {
 
   render();
   let last = getSettings();
-  return subscribeSettings((now) => {
+  const off = subscribeSettings((now) => {
     if (now.dailyGoalMinutes !== last.dailyGoalMinutes || now.theme !== last.theme || now.practiceLog !== last.practiceLog) render();
     last = now;
   });
+  return () => {
+    off();
+    midi.dispose();
+  };
 }
 
 export function applyTheme(): void {

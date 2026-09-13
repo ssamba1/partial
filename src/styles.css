@@ -2988,6 +2988,24 @@ canvas.page {
   font-weight: 650;
 }
 
+.midi-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.midi-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.midi-row:last-child {
+  border-bottom: 0;
+}
+
 /* Click tracks v2 */
 .track-chips {
   display: flex;

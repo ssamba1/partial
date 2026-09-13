@@ -8,6 +8,7 @@ import { noteName, prettyName, TRANSPOSITIONS, transpose } from '../../core/note
 import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
 import { haptic, iconButton, openSheet, segmented } from '../components';
 import { cssVar, errorBox, fitCanvas, h, select } from '../dom';
+import { announce } from '../controls';
 import { createPitchRing } from '../pitchRing';
 import { ActivityTimer, createTracker, recordTuningFrame } from '../shared';
 
@@ -424,6 +425,7 @@ export function mountTuner(root: HTMLElement) {
     centsEl.textContent = inTune ? 'in tune' : direction;
     barNote.textContent = `${pretty}${Math.floor(displayMidi / 12) - 1}`;
     barCents.textContent = inTune ? `${formatCents(cents)} in tune` : direction;
+    if (!f.held) announce(`${pretty.replace('♯', ' sharp').replace('♭', ' flat')}, ${inTune ? 'in tune' : direction.replace('¢', ' cents')}`);
     strobeNote.textContent = barNote.textContent;
     strobeCents.textContent = barCents.textContent;
     barNeedle.style.left = `${50 + Math.max(-50, Math.min(50, cents))}%`;

@@ -5,6 +5,7 @@ import { activeNotes, onDronesChange, stopAll } from './audio/droneBank';
 import { noteName } from './core/notes';
 import { getSettings, subscribeSettings, updateSettings } from './store/settings';
 import { holdButton, iconButton, openSheet } from './ui/components';
+import { installGlobalShortcuts, restoreMidi } from './ui/controls';
 import { h } from './ui/dom';
 import { icon, type IconName } from './ui/icons';
 import { startRouter, type Route } from './ui/router';
@@ -123,12 +124,15 @@ function openHelp() {
     h(
       'div',
       { class: 'stack' },
-      row(['Space'], 'Start or stop the tuner, metronome or analysis on the current screen'),
+      row(['Space'], 'Start or stop the tuner, metronome, click track or analysis on the current screen'),
+      row(['M'], 'Metronome on or off from any screen'),
+      row(['D'], 'Stop all drones'),
+      row(['1', '9'], 'Jump to a screen, in the order of the menu'),
       row(['↑', '↓'], 'Change tempo (hold Shift for 10)'),
       row(['T'], 'Tap tempo'),
       row(['\u2190', '\u2192'], 'Turn pages in sheet music'),
       row(['Esc'], 'Close a panel'),
-      h('p', { class: 'muted small' }, 'Every button that repeats when held (tempo, reference pitch, octave) also works with a single tap. The tempo dial can be spun with a finger, a mouse wheel or the arrow keys.'),
+      h('p', { class: 'muted small' }, 'Every button that repeats when held (tempo, reference pitch, octave) also works with a single tap. The tempo dial can be spun with a finger, a mouse wheel or the arrow keys. Foot pedals and MIDI controllers can be assigned under Practice.'),
     ),
   );
 }
@@ -208,6 +212,9 @@ startRouter(routes, outlet, (route) => {
   });
   moreBtn.classList.toggle('active', !(route as AppRoute).primary);
 });
+
+installGlobalShortcuts(routes.map((r) => r.path), openHelp);
+restoreMidi();
 
 /* ---------- First run ---------- */
 
