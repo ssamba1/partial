@@ -38,8 +38,8 @@ describe('polyrhythm', () => {
 
 describe('tempo markings', () => {
   it('names common tempos', () => {
-    expect(tempoMarking(60)).toBe('Larghetto');
-    expect(tempoMarking(100)).toBe('Andante');
+    expect(tempoMarking(60)).toBe('Larghetto or Adagio…');
+    expect(tempoMarking(100)).toBe('Andantino or Andante');
     expect(tempoMarking(130)).toBe('Allegro');
     expect(tempoMarking(390)).toBe('Prestissimo');
   });

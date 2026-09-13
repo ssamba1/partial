@@ -2,7 +2,7 @@ import { ensureRunning, getMaster } from '../../audio/context';
 import { LookaheadScheduler } from '../../audio/scheduler';
 import { playClick } from '../../audio/voices';
 import { formatDuration, uid } from '../../core/format';
-import { clampBpm, defaultAccents, expandClickTrack, sectionSpans, type ClickSection, type ClickTrack } from '../../core/rhythm';
+import { clampBpm, defaultAccents, MAX_BPM, MIN_BPM, type RampCurve, expandClickTrack, sectionSpans, type ClickSection, type ClickTrack } from '../../core/rhythm';
 import { getSettings, logPractice, updateSettings } from '../../store/settings';
 import { holdButton, iconButton, openSheet, toast } from '../components';
 import { h, select } from '../dom';
@@ -200,7 +200,7 @@ export function mountClickTrack(root: HTMLElement) {
         'div',
         { class: 'section-grid' },
         stepper('Bars', s.bars, 1, 999, (n) => update({ bars: n })),
-        stepper('BPM', s.bpm, 20, 400, (n) => update({ bpm: clampBpm(n) })),
+        stepper('BPM', s.bpm, MIN_BPM, MAX_BPM, (n) => update({ bpm: clampBpm(n) })),
         stepper('Beats', s.beatsPerBar, 1, 16, (n) => update({ beatsPerBar: n })),
         h(
           'div',
@@ -218,9 +218,26 @@ export function mountClickTrack(root: HTMLElement) {
           'label',
           { class: 'mini-stepper ramp-toggle' },
           h('span', null, 'Tempo ramp'),
-          h('input', { type: 'checkbox', role: 'switch', checked: ramp, onchange: (e: Event) => update({ endBpm: (e.target as HTMLInputElement).checked ? Math.min(400, s.bpm + 20) : undefined }, true) }),
+          h('input', { type: 'checkbox', role: 'switch', checked: ramp, onchange: (e: Event) => update({ endBpm: (e.target as HTMLInputElement).checked ? Math.min(MAX_BPM, s.bpm + 20) : undefined }, true) }),
         ),
-        ramp ? stepper('Ends at', s.endBpm!, 20, 400, (n) => update({ endBpm: clampBpm(n) })) : null,
+        ramp ? stepper('Ends at', s.endBpm!, MIN_BPM, MAX_BPM, (n) => update({ endBpm: clampBpm(n) })) : null,
+        ramp
+          ? h(
+              'div',
+              { class: 'mini-stepper' },
+              h('span', null, 'Ramp shape'),
+              select(
+                [
+                  { value: 'beat', label: 'Same change every beat' },
+                  { value: 'time', label: 'Steady change per second' },
+                  { value: 'exp', label: 'Same ratio per second' },
+                ],
+                s.curve ?? 'beat',
+                (v) => update({ curve: v as RampCurve }),
+                { class: 'compact', 'aria-label': 'Ramp shape' },
+              ),
+            )
+          : null,
       ),
     );
   }

@@ -59,13 +59,19 @@ export function numberInput(
   onChange: (n: number) => void,
   props: { min?: number; max?: number; step?: number; class?: string } = {},
 ): HTMLInputElement {
+  let last = value;
   return h('input', {
     type: 'number',
     value: String(value),
     ...props,
     onchange: (e: Event) => {
-      const n = Number((e.target as HTMLInputElement).value);
-      if (Number.isFinite(n)) onChange(n);
+      const el = e.target as HTMLInputElement;
+      // An empty field is not 0: put the last good value back instead of jumping to the minimum.
+      const n = el.value.trim() === '' ? NaN : Number(el.value);
+      if (Number.isFinite(n)) {
+        last = n;
+        onChange(n);
+      } else el.value = String(last);
     },
   });
 }

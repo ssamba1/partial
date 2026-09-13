@@ -2,7 +2,7 @@ import { stopAll } from '../audio/droneBank';
 import { midiTrigger, type MidiAction } from '../core/midi';
 import { getSettings, subscribeSettings } from '../store/settings';
 import { toast } from './components';
-import { metronome } from './shared';
+import { metronome, tapInput } from './shared';
 
 /* ---------- Keyboard ---------- */
 
@@ -20,7 +20,12 @@ export function installGlobalShortcuts(routes: string[], openHelp: () => void): 
     const route = location.hash.replace(/^#\/?/, '');
     if (key === 'm' && route !== 'metronome') {
       e.preventDefault();
-      metronome.toggle();
+      // Holding the key must not start and stop over and over.
+      if (!e.repeat) metronome.toggle();
+    } else if (key === 't' && route !== 'metronome') {
+      // Tap tempo from any screen; the metronome screen handles T itself.
+      e.preventDefault();
+      if (!e.repeat) tapInput(e.timeStamp);
     } else if (key === 'd') {
       e.preventDefault();
       stopAll();
@@ -45,7 +50,7 @@ function dispatchKey(key: string, code = key) {
   window.dispatchEvent(new KeyboardEvent('keydown', { key, code, bubbles: true }));
 }
 
-export function runAction(action: MidiAction): void {
+export function runAction(action: MidiAction, timeStamp = performance.now()): void {
   switch (action) {
     case 'next':
       dispatchKey('ArrowRight');
@@ -60,7 +65,8 @@ export function runAction(action: MidiAction): void {
       metronome.toggle();
       break;
     case 'tap':
-      dispatchKey('t', 'KeyT');
+      // Straight to the shared tap handler with the event's own time, on every screen.
+      tapInput(timeStamp);
       break;
   }
 }
@@ -76,7 +82,7 @@ function onMessage(e: MIDIMessageEvent) {
     return;
   }
   const action = getSettings().midiMap[trigger];
-  if (action) runAction(action);
+  if (action) runAction(action, e.timeStamp);
 }
 
 function wire() {

@@ -100,7 +100,9 @@ function envelope(ctx: BaseAudioContext, dest: AudioNode, when: number, peak: nu
   const g = ctx.createGain();
   g.gain.setValueAtTime(0, when);
   g.gain.linearRampToValueAtTime(peak, when + 0.001);
-  g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
+  // Decay to a fixed fraction of the peak, so a click's shape does not depend on its level
+  // and a render at one gain scales exactly to any other.
+  g.gain.exponentialRampToValueAtTime(Math.max(1e-9, peak * 1e-4), when + decay);
   g.connect(dest);
   return g;
 }
@@ -131,7 +133,7 @@ const PITCH_BY_LEVEL: Record<AccentLevel | 'sub', number> = { accent: 1.5, mediu
 const BRIGHT_BY_LEVEL: Record<AccentLevel | 'sub', number> = { accent: 1.35, medium: 1.15, normal: 1, soft: 0.9, sub: 0.85, silent: 1 };
 
 /** Draw one click with live nodes. Level changes pitch and colour; `peak` carries the gain. */
-function synthClick(ctx: BaseAudioContext, dest: AudioNode, when: number, level: AccentLevel | 'sub', sound: ClickSound, peak: number): void {
+export function synthClick(ctx: BaseAudioContext, dest: AudioNode, when: number, level: AccentLevel | 'sub', sound: ClickSound, peak: number): void {
   const p = PITCH_BY_LEVEL[level];
   const bright = BRIGHT_BY_LEVEL[level];
   const strong = level === 'accent' || level === 'medium';
@@ -170,8 +172,8 @@ function synthClick(ctx: BaseAudioContext, dest: AudioNode, when: number, level:
     case 'kick':
       tone(ctx, dest, when, 150 * p, 'sine', peak * 1.2, 0.18, 45);
       // Second harmonic and a beater transient, so phone speakers that cannot play the low sine still hear it.
-      tone(ctx, dest, when, 300 * p, 'sine', peak * 0.45, 0.08, 110);
-      noise(ctx, dest, when, 'bandpass', 3200 * bright, 1.5, peak * 0.9, 0.012);
+      tone(ctx, dest, when, 300 * p, 'sine', peak * 0.6, 0.1, 220);
+      noise(ctx, dest, when, 'bandpass', 3200 * bright, 1.5, peak * 1.5, 0.014);
       tone(ctx, dest, when, 1000, 'triangle', peak * 0.1, 0.01);
       break;
     case 'snare':
@@ -227,6 +229,8 @@ const RENDER_LEVELS: (AccentLevel | 'sub')[] = ['accent', 'medium', 'normal', 's
 const SLOT_SECONDS = 1;
 
 const clickSets = new Map<string, Partial<Record<AccentLevel | 'sub', AudioBuffer>>>();
+/** Loudness-matching gain baked into each rendered sound, so tests can compare against live synthesis. */
+const clickGains = new Map<string, number>();
 const clickRenders = new Map<string, Promise<void>>();
 
 /** Energy-based level of a click: RMS over a 4-beat pattern at 120 BPM (one click per 0.5 s). */
@@ -253,18 +257,31 @@ export function loudnessGain(rms: number, peak: number, targetRms: number, peakC
 }
 
 async function renderRaw(sampleRate: number, sound: ClickSound, gain: number): Promise<Float32Array[]> {
-  const length = Math.ceil(sampleRate * SLOT_SECONDS * RENDER_LEVELS.length);
-  const off = new OfflineAudioContext(1, length, sampleRate);
-  RENDER_LEVELS.forEach((level, i) => synthClick(off, off.destination, i * SLOT_SECONDS + 0.001, level, sound, gain));
-  const out = await off.startRendering();
-  const data = out.getChannelData(0);
-  const slot = Math.floor(sampleRate * SLOT_SECONDS);
-  return RENDER_LEVELS.map((_, i) => {
-    const seg = data.subarray(i * slot, (i + 1) * slot);
-    let last = seg.length - 1;
-    while (last > 0 && Math.abs(seg[last]) < 1e-4) last--;
-    return seg.slice(0, last + 1);
-  });
+  // One context per level, each click 1 ms in. Slots in one long render would start at
+  // times like 4.001 s that do not fall exactly on a sample, which shifts tone phase.
+  return Promise.all(
+    RENDER_LEVELS.map(async (level) => {
+      const off = new OfflineAudioContext(1, Math.ceil(sampleRate * SLOT_SECONDS), sampleRate);
+      synthClick(off, off.destination, 0.001, level, sound, gain);
+      const seg = (await off.startRendering()).getChannelData(0);
+      let last = seg.length - 1;
+      while (last > 0 && Math.abs(seg[last]) < 1e-4) last--;
+      return seg.slice(0, last + 1);
+    }),
+  );
+}
+
+/**
+ * Extra gain per level so the rendered energy keeps the order of the levels: an
+ * accent never ends up with less RMS than a normal click (pitch and filter changes
+ * can shave a little off), and soft clicks never end up with more.
+ */
+export function levelTrim(levelRms: number, normalRms: number, level: AccentLevel | 'sub'): number {
+  if (!(levelRms > 0) || !(normalRms > 0)) return 1;
+  const ratio = normalRms / levelRms;
+  if (level === 'accent' || level === 'medium') return Math.max(1, ratio);
+  if (level === 'soft' || level === 'sub') return Math.min(1, ratio);
+  return 1;
 }
 
 let referenceRms: Promise<number> | null = null;
@@ -293,11 +310,14 @@ export function prepareClicks(ctx: BaseAudioContext, sounds: ClickSound[]): Prom
           .then(([target, segs]) => {
             const gain = loudnessGain(patternRms(segs[0], rate), peakOf(segs[0]), target);
             const buffers: Partial<Record<AccentLevel | 'sub', AudioBuffer>> = {};
+            const normalRms = patternRms(segs[RENDER_LEVELS.indexOf('normal')], rate);
             RENDER_LEVELS.forEach((level, i) => {
               const seg = segs[i];
+              const g = gain * levelTrim(patternRms(seg, rate), normalRms, level);
+              clickGains.set(`${key}:${level}`, g);
               const buf = new AudioBuffer({ length: Math.max(1, seg.length), sampleRate: rate, numberOfChannels: 1 });
               const d = buf.getChannelData(0);
-              for (let k = 0; k < seg.length; k++) d[k] = seg[k] * gain;
+              for (let k = 0; k < seg.length; k++) d[k] = seg[k] * g;
               buffers[level] = buf;
             });
             clickSets.set(key, buffers);
@@ -311,6 +331,14 @@ export function prepareClicks(ctx: BaseAudioContext, sounds: ClickSound[]): Prom
       return job;
     }),
   ).then(() => undefined);
+}
+
+/** The pre-rendered buffer and its baked-in gain for a sound and level, once `prepareClicks` has finished. */
+export function renderedClick(sampleRate: number, sound: ClickSound, level: AccentLevel | 'sub'): { buffer: AudioBuffer; gain: number } | null {
+  const key = `${sampleRate}:${sound}`;
+  const buffer = clickSets.get(key)?.[level];
+  const gain = clickGains.get(`${key}:${level}`);
+  return buffer && gain !== undefined ? { buffer, gain } : null;
 }
 
 export interface ClickOptions {

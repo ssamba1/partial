@@ -6,6 +6,7 @@ import type { TuningCheckEntry } from '../core/tuningtools';
 import { dayKey } from '../core/practice';
 import type { AccentLevel, ClickTrack } from '../core/rhythm';
 import type { SubLayer } from '../core/metroseq';
+import type { RampCurve } from '../core/rhythm';
 import type { Damping } from '../core/tracking';
 import type { MicChannel } from '../core/mic';
 import type { ReferenceOctave } from '../core/selfsound';
@@ -27,7 +28,8 @@ export interface MetronomePreset {
   drones?: number[];
 }
 
-export type BeatVisual = 'blocks' | 'pendulum' | 'pulse';
+export type BeatVisual = 'blocks' | 'pendulum' | 'pulse' | 'conductor';
+export type FlashStyle = 'full' | 'edge' | 'small';
 
 export interface TuningPreset {
   id: string;
@@ -181,6 +183,35 @@ export interface Settings {
     swing: number;
     layers: SubLayer[];
     timeline: string;
+    /** Shift clicks later by a fraction of a beat. */
+    offset: number;
+    /** Relative beat lengths; empty = even. */
+    beatWeights: number[];
+    /** Tempo ramp to this BPM over rampBars bars (0 = off). */
+    rampTo: number;
+    rampBars: number;
+    rampCurve: RampCurve;
+    groove: string;
+    grooveFill: number;
+    grooveClick: boolean;
+    /** Rudiment id for the sticking row; '' = off. */
+    rudiment: string;
+    /** Speed trainer extras. */
+    trainerUnit: 'bpm' | 'percent';
+    trainerEvery: 'bars' | 'seconds';
+    trainerSeconds: number;
+    /** Steps toward the target, repeated; empty = [trainerStep]. Negative steps go back. */
+    trainerPattern: number[];
+    trainerOnMax: 'hold' | 'loop' | 'stop';
+    /** Stop now or at the end of the bar. */
+    stopMode: 'now' | 'bar';
+    /** Goal tempo for the percentage buttons; 0 = none. */
+    targetBpm: number;
+    /** Dial and +/- step between traditional metronome marks. */
+    snapMarks: boolean;
+    /** Show bars per minute instead of BPM. */
+    tempoUnit: 'bpm' | 'bars';
+    flashStyle: FlashStyle;
     /** Accent patterns remembered per meter ("7/8"), restored when you return to it. */
     accentMemory: Record<string, AccentLevel[]>;
   };
@@ -287,6 +318,25 @@ export const DEFAULT_SETTINGS: Settings = {
     swing: 50,
     layers: [],
     timeline: '',
+    offset: 0,
+    beatWeights: [],
+    rampTo: 0,
+    rampBars: 4,
+    rampCurve: 'time',
+    groove: '',
+    grooveFill: 0,
+    grooveClick: false,
+    rudiment: '',
+    trainerUnit: 'bpm',
+    trainerEvery: 'bars',
+    trainerSeconds: 30,
+    trainerPattern: [],
+    trainerOnMax: 'hold',
+    stopMode: 'now',
+    targetBpm: 0,
+    snapMarks: false,
+    tempoUnit: 'bpm',
+    flashStyle: 'full',
     accentMemory: {},
   },
   metronomePresets: [],

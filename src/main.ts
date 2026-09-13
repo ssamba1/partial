@@ -5,15 +5,17 @@ import { activeNotes, onDronesChange, stopAll } from './audio/droneBank';
 import { noteName, transpositionShort } from './core/notes';
 import { getSettings, subscribeSettings, updateSettings } from './store/settings';
 import { holdButton, iconButton, openSheet, toast } from './ui/components';
-import { installGlobalShortcuts, restoreMidi } from './ui/controls';
+import { announce, installGlobalShortcuts, restoreMidi } from './ui/controls';
+import { installFlash } from './ui/flash';
+import { formatBpm } from './core/rhythm';
 import { h } from './ui/dom';
 import { icon, type IconName } from './ui/icons';
 import { startRouter, type Route } from './ui/router';
-import { metronome, onSession, resetSession } from './ui/shared';
+import { metronome, onSession, onTap, resetSession, tapInput } from './ui/shared';
 import { openTuningSheet, tuningSummary } from './ui/tuningSheet';
 import { mountAnalysis } from './ui/views/analysis';
 import { mountClickTrack } from './ui/views/clicktrack';
-import { mountMetronome, setMetronome } from './ui/views/metronome';
+import { mountMetronome, setMetronome, stepTempo } from './ui/views/metronome';
 import { applyTheme, mountPractice } from './ui/views/practice';
 import { mountRecorder } from './ui/views/recorder';
 import { mountSound } from './ui/views/sound';
@@ -155,25 +157,58 @@ const dockPlay = h('button', { class: 'dock-play', onclick: () => metronome.togg
 const dockBpm = h('a', { class: 'dock-bpm', href: '#/metronome', 'aria-label': 'Open metronome' });
 const dockBeats = h('div', { class: 'dock-beats', 'aria-hidden': 'true' });
 const dockDrones = h('div', { class: 'dock-drones' });
+let dockTapPointer = false;
+const dockTap = h(
+  'button',
+  {
+    class: 'dock-step dock-tap',
+    'aria-label': 'Tap tempo',
+    title: 'Tap tempo',
+    onpointerdown: (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      dockTapPointer = true;
+      tapInput(e.timeStamp);
+    },
+    onclick: (e: MouseEvent) => {
+      if (dockTapPointer) dockTapPointer = false;
+      else tapInput(e.timeStamp);
+    },
+  },
+  icon('tap', 16),
+);
+onTap((count, bpm) => dockTap.setAttribute('aria-label', bpm !== null ? `Tap tempo, ${count} taps, ${formatBpm(bpm)} BPM` : `Tap tempo, ${count} taps`));
 const dock = h(
   'div',
   { class: 'dock', role: 'region', 'aria-label': 'Quick metronome' },
   dockPlay,
-  holdButton(icon('minus', 16), 'Slower', () => setMetronome({ bpm: getSettings().metronome.bpm - 1 }), 'dock-step'),
+  holdButton(icon('minus', 16), 'Slower', () => setMetronome({ bpm: stepTempo(getSettings().metronome.bpm, -1) }), 'dock-step'),
   dockBpm,
-  holdButton(icon('plus', 16), 'Faster', () => setMetronome({ bpm: getSettings().metronome.bpm + 1 }), 'dock-step'),
+  holdButton(icon('plus', 16), 'Faster', () => setMetronome({ bpm: stepTempo(getSettings().metronome.bpm, 1) }), 'dock-step'),
+  dockTap,
   dockBeats,
   dockDrones,
 );
 
+let dockKey = '';
+let dockDronesKey = '';
+/** Updates only what changed, so a button under a finger or keyboard focus is never replaced mid-bar. */
 function renderDock() {
   const m = getSettings().metronome;
-  dockPlay.replaceChildren(icon(metronome.playing ? 'stop' : 'play', 18));
-  dockPlay.setAttribute('aria-label', metronome.playing ? 'Stop metronome' : 'Start metronome');
-  dock.classList.toggle('playing', metronome.playing);
-  dockBpm.replaceChildren(h('b', null, String(metronome.settings.bpm)), h('span', null, `BPM · ${m.beatsPerBar}/${m.beatUnit}`));
-  if (dockBeats.children.length !== m.beatsPerBar) dockBeats.replaceChildren(...Array.from({ length: m.beatsPerBar }, () => h('i')));
+  const playing = metronome.playing;
+  const key = `${playing}|${metronome.bpm}|${m.beatsPerBar}/${m.beatUnit}`;
+  if (key !== dockKey) {
+    const playChanged = dockKey.split('|')[0] !== String(playing);
+    dockKey = key;
+    if (playChanged) dockPlay.replaceChildren(icon(playing ? 'stop' : 'play', 18));
+    dockPlay.setAttribute('aria-label', playing ? 'Stop metronome' : 'Start metronome');
+    dock.classList.toggle('playing', playing);
+    dockBpm.replaceChildren(h('b', null, formatBpm(metronome.bpm)), h('span', null, `BPM · ${m.beatsPerBar}/${m.beatUnit}`));
+    if (dockBeats.children.length !== m.beatsPerBar) dockBeats.replaceChildren(...Array.from({ length: m.beatsPerBar }, () => h('i')));
+  }
   const notes = activeNotes();
+  const dronesKey = `${notes.join()}|${getSettings().flats}`;
+  if (dronesKey === dockDronesKey) return;
+  dockDronesKey = dronesKey;
   dockDrones.replaceChildren(
     ...(notes.length
       ? [h('button', { class: 'dock-drone', onclick: stopAll, 'aria-label': 'Stop all drones' }, icon('sound', 14), notes.slice(0, 3).map((n) => noteName(n, getSettings().flats)).join(' '), notes.length > 3 ? '…' : '', icon('close', 12))]
@@ -192,6 +227,30 @@ const stallBanner = h(
   { class: 'stall-banner', hidden: true, onclick: () => void metronome.resume() },
   'Audio paused by the system. Tap to resume.',
 );
+// Speed trainer: say each step, and when playback ends ask whether to keep the new tempo.
+const trainerBar = h('div', { class: 'trainer-keep', role: 'status', hidden: true });
+metronome.onTrainer((t, ended) => {
+  renderDock();
+  if (!t) {
+    if (!ended) trainerBar.hidden = true;
+    return;
+  }
+  if (!ended) {
+    announce(t.reached ? `Reached ${formatBpm(t.target)} BPM` : `Tempo ${formatBpm(t.bpm)}`, true);
+    if (t.reached) toast(`Reached ${formatBpm(t.target)}`);
+    return;
+  }
+  const saved = getSettings().metronome.bpm;
+  trainerBar.replaceChildren(
+    h('span', null, `Trainer ended at ${formatBpm(t.bpm)} BPM.`),
+    h('button', { class: 'pill-btn', onclick: () => { const bpm = metronome.finishTrainer(true); if (bpm !== null) setMetronome({ bpm }); trainerBar.hidden = true; } }, `Keep ${formatBpm(t.bpm)}`),
+    h('button', { class: 'pill-btn', onclick: () => { metronome.finishTrainer(false); trainerBar.hidden = true; renderDock(); } }, `Back to ${formatBpm(saved)}`),
+  );
+  trainerBar.hidden = false;
+});
+metronome.onState((playing) => {
+  if (playing) trainerBar.hidden = true;
+});
 metronome.onStall((stalled) => {
   stallBanner.hidden = !stalled;
 });
@@ -223,8 +282,10 @@ document.getElementById('app')!.replaceChildren(
   h('div', { class: 'app-main' }, topbar, outlet),
   dock,
   stallBanner,
+  trainerBar,
   tabbar,
 );
+installFlash(document.body);
 renderTuningChip();
 renderDock();
 
@@ -260,6 +321,11 @@ if (!getSettings().seenIntro) {
     ),
     { onClose: () => updateSettings({ seenIntro: true }) },
   );
+}
+
+// Offline audio measurements for the end-to-end checks.
+if (new URLSearchParams(location.search).has('selftest')) {
+  void import('./audio/selftest').then((m) => ((window as unknown as { __selftest: typeof m }).__selftest = m));
 }
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

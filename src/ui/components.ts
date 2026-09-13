@@ -24,6 +24,8 @@ export interface SegmentOption<T extends string> {
   value: T;
   label: string;
   icon?: IconName;
+  /** Spoken name when the label is a symbol. */
+  ariaLabel?: string;
 }
 
 export function segmented<T extends string>(
@@ -39,10 +41,27 @@ export function segmented<T extends string>(
         class: 'seg-btn',
         role: 'radio',
         'aria-checked': o.value === value ? 'true' : 'false',
+        'aria-label': o.ariaLabel,
+        tabindex: o.value === value ? '0' : '-1',
         'data-value': o.value,
         onclick: () => {
           set(o.value);
           onChange(o.value);
+        },
+        // Radio group keys: arrows move and select, so one Tab stop covers the group.
+        onkeydown: (e: KeyboardEvent) => {
+          const keys: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+          let i = options.findIndex((x) => x.value === o.value);
+          if (e.key in keys) i = (i + keys[e.key] + options.length) % options.length;
+          else if (e.key === 'Home') i = 0;
+          else if (e.key === 'End') i = options.length - 1;
+          else return;
+          e.preventDefault();
+          e.stopPropagation();
+          const next = options[i].value;
+          set(next);
+          buttons[i].focus();
+          onChange(next);
         },
       },
       o.icon ? icon(o.icon, 18) : null,
@@ -51,7 +70,12 @@ export function segmented<T extends string>(
   );
   const el = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': ariaLabel }, buttons) as unknown as HTMLElement & { set: (v: T) => void };
   function set(v: T) {
-    buttons.forEach((b) => b.setAttribute('aria-checked', b.dataset.value === v ? 'true' : 'false'));
+    buttons.forEach((b) => {
+      b.setAttribute('aria-checked', b.dataset.value === v ? 'true' : 'false');
+      b.tabIndex = b.dataset.value === v ? 0 : -1;
+    });
+    // Nothing selected (for example a rhythm figure instead of a subdivision): keep the first button reachable.
+    if (!buttons.some((b) => b.dataset.value === v) && buttons[0]) buttons[0].tabIndex = 0;
   }
   el.set = set;
   return el;
@@ -168,6 +192,10 @@ export interface DialOptions {
   degreesPerStep?: number;
   label: string;
   center: HTMLElement;
+  /** Next value from `cur` for `steps` steps (negative = down); `fine` for Shift-drag. Default: cur + steps. */
+  step?: (cur: number, steps: number, fine: boolean) => number;
+  /** Text for aria-valuetext. */
+  valueText?: (v: number) => string;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -212,10 +240,11 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
   rotor.append(ticks, svgEl('circle', { cx: size / 2, cy: size / 2 - r + 28, r: 7, class: 'dial-knob' }));
   svg.append(track, progress, rotor);
 
-  const el = h(
+  // The slider role sits on the ring; the centre controls are siblings on top, not children of the slider.
+  const ring = h(
     'div',
     {
-      class: 'dial',
+      class: 'dial-ring',
       role: 'slider',
       tabindex: '0',
       'aria-label': opts.label,
@@ -223,8 +252,8 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
       'aria-valuemax': String(opts.max),
     },
     svg,
-    h('div', { class: 'dial-center' }, opts.center),
-  ) as unknown as HTMLElement & { refresh: () => void };
+  );
+  const el = h('div', { class: 'dial' }, ring, h('div', { class: 'dial-center' }, opts.center)) as unknown as HTMLElement & { refresh: () => void };
 
   const per = opts.degreesPerStep ?? 4;
   let rotation = 0;
@@ -232,9 +261,11 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
   let lastAngle = 0;
   let dragging = false;
 
+  let fine = false;
   const apply = (steps: number) => {
     if (!steps) return;
-    const next = Math.min(opts.max, Math.max(opts.min, opts.get() + steps));
+    const raw = opts.step ? opts.step(opts.get(), steps, fine) : opts.get() + steps;
+    const next = Math.min(opts.max, Math.max(opts.min, raw));
     if (next !== opts.get()) {
       opts.set(next);
       haptic(4);
@@ -244,6 +275,7 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
   el.addEventListener('pointerdown', (e) => {
     if ((e.target as HTMLElement).closest('.dial-center button, .dial-center input')) return;
     dragging = true;
+    fine = e.shiftKey;
     capturePointer(el, e.pointerId);
     const rect = el.getBoundingClientRect();
     lastAngle = pointAngle(rect.left + rect.width / 2, rect.top + rect.height / 2, e.clientX, e.clientY);
@@ -254,6 +286,7 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
     if (!dragging) return;
     const rect = el.getBoundingClientRect();
     const a = pointAngle(rect.left + rect.width / 2, rect.top + rect.height / 2, e.clientX, e.clientY);
+    fine = e.shiftKey;
     const d = angleDelta(lastAngle, a);
     lastAngle = a;
     rotation += d;
@@ -264,6 +297,7 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
   });
   const end = () => {
     dragging = false;
+    fine = false;
     el.classList.remove('dragging');
   };
   el.addEventListener('pointerup', end);
@@ -272,6 +306,7 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
     'wheel',
     (e) => {
       e.preventDefault();
+      fine = e.shiftKey;
       const steps = e.deltaY < 0 ? 1 : -1;
       rotation += steps * per;
       rotor.setAttribute('transform', `rotate(${rotation} ${size / 2} ${size / 2})`);
@@ -279,7 +314,8 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
     },
     { passive: false },
   );
-  el.addEventListener('keydown', (e) => {
+  ring.addEventListener('keydown', (e) => {
+    fine = false;
     const big = e.shiftKey ? 10 : 1;
     if (e.key === 'ArrowUp' || e.key === 'ArrowRight') apply(big);
     else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') apply(-big);
@@ -294,7 +330,8 @@ export function dial(opts: DialOptions): HTMLElement & { refresh: () => void } {
     const v = opts.get();
     const frac = (v - opts.min) / (opts.max - opts.min);
     progress.setAttribute('stroke-dasharray', `${frac * circumference} ${circumference}`);
-    el.setAttribute('aria-valuenow', String(v));
+    ring.setAttribute('aria-valuenow', String(v));
+    if (opts.valueText) ring.setAttribute('aria-valuetext', opts.valueText(v));
   };
   el.refresh();
   return el;

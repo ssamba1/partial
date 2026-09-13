@@ -1,6 +1,7 @@
 import { Metronome } from '../audio/metronome';
 import { PitchTracker, type TrackerOptions } from '../audio/pitchTracker';
 import { getContext } from '../audio/context';
+import { TapTempo } from '../core/rhythm';
 import { ClickLog, nearClick } from '../core/gestures';
 import { ClickAudibility, SelfSounds } from '../core/selfsound';
 import { getSettings, logPractice, subscribeSettings, tuningOf, updateSettings, type Activity } from '../store/settings';
@@ -59,11 +60,38 @@ metronome.onState((playing) => {
   metronomeStartedAt = 0;
 });
 
-// Write speed-trainer tempo changes to settings the moment they happen, so no
-// other settings write in between can push the old tempo back into the engine.
-metronome.onTempo((bpm) => {
-  updateSettings((s) => ({ metronome: { ...s.metronome, bpm } }));
-});
+/* ---------- Tap tempo, shared by the tap button, the dock, the T key, MIDI and hands-free taps ---------- */
+
+export const tapper = new TapTempo();
+const tapListeners = new Set<(count: number, bpm: number | null) => void>();
+
+/** Taps so far and the tempo shown on tap buttons. */
+export function onTap(fn: (count: number, bpm: number | null) => void): () => void {
+  tapListeners.add(fn);
+  return () => tapListeners.delete(fn);
+}
+
+/**
+ * One tap at `timeMs` (event.timeStamp, on the performance.now() clock). From the third tap the tempo
+ * is set. While playing, the fourth tap lines the beat up: the next bar starts one tapped beat
+ * after the last tap, earlier by the output latency so it is heard on time.
+ */
+export function tapInput(timeMs: number): void {
+  const bpm = tapper.add(timeMs);
+  if (bpm !== null) updateSettings((s) => ({ metronome: { ...s.metronome, bpm } }));
+  tapListeners.forEach((fn) => fn(tapper.count, bpm));
+  const interval = tapper.intervalMs();
+  if (tapper.count === 4 && interval && metronome.playing) {
+    const ctx = getContext();
+    const stamp = typeof ctx.getOutputTimestamp === 'function' ? ctx.getOutputTimestamp() : null;
+    const perfNow = stamp?.performanceTime ?? performance.now();
+    const ctxNow = stamp?.contextTime ?? ctx.currentTime;
+    let at = timeMs + interval;
+    while (at < perfNow + 60) at += interval;
+    const when = ctxNow + (at - perfNow) / 1000 - outputLatency();
+    void metronome.alignTo(when);
+  }
+}
 
 subscribeSettings((s) => {
   const m = s.metronome;

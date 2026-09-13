@@ -444,6 +444,24 @@ await check('metronome schedules exact 100 BPM triplets', async () => {
   return `${gaps.length} gaps of 0.2 s`;
 });
 
+// 02-16, 02-17, 02-19, 02-21: offline renders of the real click and master chain code.
+await check('metronome audio: limiter ceiling, pre-render match, accent lift, kick above 300 Hz', async () => {
+  await send('Page.navigate', { url: `${BASE}?selftest#/metronome` });
+  await sleep(1500);
+  const out = await run(`for (let i = 0; i < 60 && !window.__selftest; i++) await new Promise((r) => setTimeout(r, 100));
+    const t = window.__selftest;
+    return { peaks: await t.limiterPeaks(), match: await t.renderMatch(), lift: await t.accentLift(6), hf: await t.energyAbove300() };`);
+  assert(out.peaks.raw > 1 && out.peaks.limited <= 1 && out.peaks.limited <= out.peaks.ceiling + 1e-6, `peaks ${JSON.stringify(out.peaks)}`);
+  const worst = Object.entries(out.match).sort((a, b) => b[1] - a[1])[0];
+  assert(worst[1] <= -60, `pre-render differs from live synthesis: ${worst[0]} ${worst[1].toFixed(1)} dB`);
+  const weakest = Object.entries(out.lift).sort((a, b) => a[1].rms - b[1].rms)[0];
+  assert(weakest[1].rms >= 6 - 0.05, `accent lift ${weakest[0]} ${weakest[1].rms.toFixed(2)} dB`);
+  const others = Object.entries(out.hf).filter(([k]) => k !== 'kick').map(([, v]) => v).sort((a, b) => a - b);
+  const median = others[Math.floor(others.length / 2)];
+  assert(out.hf.kick >= median - 8, `kick above 300 Hz ${out.hf.kick.toFixed(1)} dB vs median ${median.toFixed(1)} dB`);
+  return `peak ${out.peaks.raw.toFixed(2)} -> ${out.peaks.limited.toFixed(3)}, worst match ${worst[1].toFixed(0)} dB, weakest accent ${weakest[1].rms.toFixed(2)} dB, kick HF ${(out.hf.kick - median).toFixed(1)} dB vs median`;
+});
+
 await check('metronome: a quick double tap leaves it stopped', async () => {
   await open('metronome');
   const out = await run(`
@@ -495,14 +513,89 @@ await check('speed trainer tempo survives other settings writes', async () => {
     document.querySelector('.play-btn').click(); await wait(200);
     const saved = JSON.parse(localStorage.getItem('partial.settings.v1')).metronome;
     const shown = Number(document.querySelector('.bpm-input').value);
+    const savedBpm = saved.bpm;
     // restore defaults for later checks
     saved.trainerBars = 0; saved.bpm = 100; saved.beatsPerBar = 4; saved.accents = ['accent','normal','normal','normal'];
     const all = JSON.parse(localStorage.getItem('partial.settings.v1')); all.metronome = saved; localStorage.setItem('partial.settings.v1', JSON.stringify(all));
-    return { shown };`);
+    return { shown, savedBpm };`);
   // 2.5 s at 240+ BPM in 2/4 is about 2.5 bars per second... expect several +5 steps.
   assert(result.shown >= 255, `tempo only reached ${result.shown}`);
   assert((result.shown - 240) % 5 === 0, `unexpected tempo ${result.shown}`);
-  return `reached ${result.shown} BPM`;
+  assert(result.savedBpm === 240, `trainer wrote the saved tempo: ${result.savedBpm}`);
+  return `reached ${result.shown} BPM, saved tempo still 240`;
+});
+
+await check('metronome controls: empty tempo, dial and radiogroup keys, pause, stop at bar end, flash, 16 beats at 360 px', async () => {
+  await open('metronome');
+  await run(`
+    const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k));
+    s.metronome = { ...s.metronome, bpm: 60, beatsPerBar: 4, subdivision: 1, accents: ['accent','normal','normal','normal'], stopMode: 'bar', flashScreen: true, flashStyle: 'full', trainerBars: 0 };
+    localStorage.setItem(k, JSON.stringify(s)); location.reload();`).catch(() => null);
+  await sleep(1500);
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  const out = await run(`
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const r = {};
+    const input = document.querySelector('.bpm-input');
+    input.focus(); input.value = ''; input.dispatchEvent(new Event('change')); input.blur();
+    r.empty = input.value + '/' + JSON.parse(localStorage.getItem('partial.settings.v1')).metronome.bpm;
+    const ring = document.querySelector('.dial-ring');
+    r.dial = ring.getAttribute('role') === 'slider' && !ring.querySelector('.dial-center') && !ring.contains(input);
+    const seg = document.querySelector('.segmented[role="radiogroup"]');
+    const radios = [...seg.querySelectorAll('[role="radio"]')];
+    const start = radios.findIndex((b) => b.getAttribute('aria-checked') === 'true');
+    radios[start].focus();
+    radios[start].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await wait(200);
+    const segNow = [...document.querySelector('.segmented[role="radiogroup"]').querySelectorAll('[role="radio"]')];
+    r.seg = segNow.findIndex((b) => b.getAttribute('aria-checked') === 'true') === (start + 1) % radios.length;
+    segNow[(start + 1) % radios.length].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); await wait(200);
+    const play = () => document.querySelector('.play-btn');
+    const pauseBtn = () => document.querySelector('.pause-btn');
+    const flash = document.querySelector('.screen-flash');
+    let flashSeen = false;
+    const obs = new MutationObserver(() => { if (flash.classList.contains('go')) flashSeen = true; });
+    obs.observe(flash, { attributes: true });
+    const chip = document.querySelector('.preset-chips .chip') || document.querySelector('.bpm-marking');
+    chip.focus();
+    play().click(); await wait(1500);
+    r.focusKept = document.activeElement === chip;
+    r.flash = flashSeen && getComputedStyle(flash).transitionDuration !== undefined;
+    pauseBtn().click(); await wait(300);
+    r.paused = !document.querySelector('.metronome').classList.contains('playing') && pauseBtn().getAttribute('aria-label').startsWith('Resume');
+    pauseBtn().click(); await wait(600);
+    r.resumed = document.querySelector('.metronome').classList.contains('playing');
+    play().click(); await wait(300);
+    r.stopping = document.querySelector('.metronome').classList.contains('playing') && document.querySelector('.metronome').classList.contains('stopping');
+    play().click(); await wait(400);
+    r.stoppedNow = !document.querySelector('.metronome').classList.contains('playing');
+    obs.disconnect();
+    return r;`);
+  await send('Emulation.setEmulatedMedia', { features: [] });
+  await send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
+  await run(`
+    const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k));
+    s.metronome = { ...s.metronome, beatsPerBar: 16, beatUnit: 16, accents: Array.from({ length: 16 }, (_, i) => (i ? 'normal' : 'accent')), visual: 'blocks' };
+    localStorage.setItem(k, JSON.stringify(s)); location.reload();`).catch(() => null);
+  await sleep(1500);
+  const wide = await run(`
+    for (let i = 0; i < 30 && !document.querySelector('.beat-blocks .beat-block'); i++) await new Promise((r) => setTimeout(r, 200));
+    const row = document.querySelector('.beat-blocks');
+    const over = [...row.querySelectorAll('.beat-block')].some((b) => b.getBoundingClientRect().right > window.innerWidth + 0.5);
+    return { over, scroll: document.documentElement.scrollWidth > window.innerWidth, blocks: row.querySelectorAll('.beat-block').length };`);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await run(`
+    const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k));
+    s.metronome = { ...s.metronome, bpm: 100, beatsPerBar: 4, beatUnit: 4, accents: ['accent','normal','normal','normal'], stopMode: 'now', flashScreen: false };
+    localStorage.setItem(k, JSON.stringify(s));`);
+  assert(out.empty === '60/60', `clearing the tempo field gave ${out.empty}`);
+  assert(out.focusKept, 'focus moved while playing');
+  assert(out.dial, 'dial slider role is not on the ring alone');
+  assert(out.seg, 'arrow key did not move the segmented choice');
+  assert(out.flash, 'no beat flash with reduced motion');
+  assert(out.paused && out.resumed, `pause/resume ${JSON.stringify(out)}`);
+  assert(out.stopping && out.stoppedNow, `stop at end of bar ${JSON.stringify(out)}`);
+  assert(wide.blocks === 16 && !wide.over && !wide.scroll, `16 beats at 360 px ${JSON.stringify(wide)}`);
+  return 'all eight behave';
 });
 
 await check('metronome preset saves and restores its drone', async () => {

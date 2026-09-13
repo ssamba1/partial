@@ -10,6 +10,8 @@ const PATHS = {
   practice: '<path d="M12 21a9 9 0 1 1 9-9"/><path d="M12 7v5l3 2"/><path d="M17 17l2 2 3-4"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
   play: '<path d="M8 5l11 7-11 7z" fill="currentColor"/>',
+  pause: '<rect x="6.5" y="5.5" width="3.5" height="13" rx="1" fill="currentColor"/><rect x="14" y="5.5" width="3.5" height="13" rx="1" fill="currentColor"/>',
+  conductor: '<path d="M12 5v14"/><path d="M12 19L4 12M12 19l8-7M4 12l8-7 8 7"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/>',
   stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   minus: '<path d="M5 12h14"/>',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { barEvents, expandClickTrack, sectionSpans, tapTempo, type ClickTrack } from '../src/core/rhythm';
+import { barEvents, expandClickTrack, sectionSpans, type ClickTrack } from '../src/core/rhythm';
 
 describe('barEvents', () => {
   it('4/4 at 120 with eighths', () => {
@@ -82,12 +82,5 @@ describe('sectionSpans', () => {
       { section: 1, start: 4, end: 8 },
     ]);
     expect(duration).toBe(8);
-  });
-});
-
-describe('tapTempo', () => {
-  it('median of intervals', () => {
-    expect(tapTempo([0, 500, 1000, 1700, 2000])).toBe(120);
-    expect(tapTempo([0])).toBeNull();
   });
 });

@@ -1347,14 +1347,14 @@
   "file": "gaps/02-metronome.md",
   "title": "No limiter on the master output",
   "status": "fixed",
-  "note": "partial: DynamicsCompressor limiter (-3 dB, ratio 20, 1 ms attack) on the master; the offline worst-case peak render was not done, and a compressor is not a brickwall."
+  "note": "Compressor then a WaveShaper brickwall at 0.98 on the master, so peaks cannot pass 1.0; e2e renders the loudest case offline (raw peak 6.6, limited 0.945)."
  },
  {
   "id": "02-17",
   "file": "gaps/02-metronome.md",
   "title": "Every click builds 2 to 5 audio nodes on the fly",
   "status": "fixed",
-  "note": "partial: each sound and level is pre-rendered into cached AudioBuffers and played with one source and one gain; the -60 dB match test and profiling were not done."
+  "note": "partial: pre-rendered buffers match the live synthesis at -60 dB or better (e2e render comparison); profiling on low-end phones not done."
  },
  {
   "id": "02-18",
@@ -1368,7 +1368,7 @@
   "file": "gaps/02-metronome.md",
   "title": "Accents are weak on unpitched sounds",
   "status": "fixed",
-  "note": "partial: brighter filters and extra transient layers on accents for unpitched sounds, and an accent strength setting 0 to 12 dB; only the gain math is unit tested, not a rendered level."
+  "note": "Accents on every sound are measured from rendered buffers in e2e: at least 6 dB RMS above normal."
  },
  {
   "id": "02-20",
@@ -1382,7 +1382,7 @@
   "file": "gaps/02-metronome.md",
   "title": "The kick sound is inaudible on phone speakers",
   "status": "fixed",
-  "note": "partial: kick gains a second harmonic and a 3.2 kHz beater transient, labelled best on headphones; the above-300 Hz energy comparison and a phone speaker check were not done."
+  "note": "partial: e2e renders the kick and checks its energy above 300 Hz is within 8 dB of the median sound; a real phone speaker check not done."
  },
  {
   "id": "02-22",
@@ -1403,7 +1403,7 @@
   "file": "gaps/02-metronome.md",
   "title": "No choice of the note BPM counts (dotted quarter in 6/8, half note in 2/2)",
   "status": "fixed",
-  "note": "partial: pulseNote setting sets beat length and shows the note by BPM; subdivisions stay relative to the written beat, not the pulse."
+  "note": "pulseNote sets beat length and subdivisions now divide the counted note (half note in 2/2, dotted quarter in 6/8), unit tested."
  },
  {
   "id": "02-25",
@@ -1486,241 +1486,281 @@
   "id": "02-36",
   "file": "gaps/02-metronome.md",
   "title": "No drum grooves",
-  "status": "open"
+  "status": "fixed",
+  "note": "Rock and four-on-the-floor grooves (kick, snare, hi-hat, cited), fills every N bars, swing on hi-hat eighths, option to keep the click."
  },
  {
   "id": "02-37",
   "file": "gaps/02-metronome.md",
   "title": "No rudiment or sticking practice",
-  "status": "open"
+  "status": "fixed",
+  "note": "Cited rudiment list; sticking letters shown above each click."
  },
  {
   "id": "02-38",
   "file": "gaps/02-metronome.md",
   "title": "No conductor beat-pattern visual",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: conductor visual for 2, 3, 4 and 6 beats from cited descriptions; 5 beats blocked, no source describing the pattern was found."
  },
  {
   "id": "02-39",
   "file": "gaps/02-metronome.md",
   "title": "Cannot shift the click off the beat",
-  "status": "open"
+  "status": "fixed",
+  "note": "Click offset of 0, 1/4, 1/2 or 3/4 beat."
  },
  {
   "id": "02-40",
   "file": "gaps/02-metronome.md",
   "title": "No uneven beat timing within a bar (for example Viennese waltz)",
-  "status": "open"
+  "status": "fixed",
+  "note": "Beat length weights per bar, with Viennese waltz ratios from Yang (2022) measurements."
  },
  {
   "id": "02-41",
   "file": "gaps/02-metronome.md",
   "title": "Tempo is whole numbers only",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tempo to 0.1 BPM from typing, dial and steps; decimals accepted with a comma too."
  },
  {
   "id": "02-42",
   "file": "gaps/02-metronome.md",
   "title": "Tempo range 20 to 400 is narrow at the slow end",
-  "status": "open"
+  "status": "fixed",
+  "note": "Range is now 10 to 600 BPM everywhere, click track steppers included."
  },
  {
   "id": "02-43",
   "file": "gaps/02-metronome.md",
   "title": "Clearing a number field sets it to its minimum",
-  "status": "open"
+  "status": "fixed",
+  "note": "Empty or non-numeric input restores the last value (tempo field and numberInput); e2e checks it."
  },
  {
   "id": "02-44",
   "file": "gaps/02-metronome.md",
   "title": "Half then double does not return to the original tempo",
-  "status": "open"
+  "status": "fixed",
+  "note": "Half and double store exact tempos (to 1e-6), so 101 to 50.5 and back is 101."
  },
  {
   "id": "02-45",
   "file": "gaps/02-metronome.md",
   "title": "Tempo names are uncited and overlap",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tempo markings cited, overlaps shown as \"X or Y\", the list highlights every matching name."
  },
  {
   "id": "02-46",
   "file": "gaps/02-metronome.md",
   "title": "No smooth accelerando or ritardando in the metronome, and click-track ramps are not linear in time",
-  "status": "open"
+  "status": "fixed",
+  "note": "Metronome tempo ramp over N bars then hold, with curves per beat, linear in time or exponential; click track ramps get the same shape choice."
  },
  {
   "id": "02-47",
   "file": "gaps/02-metronome.md",
   "title": "The speed trainer permanently overwrites your saved tempo",
-  "status": "open"
+  "status": "fixed",
+  "note": "Trainer tempo is an engine override; saved tempo stays until you pick Keep; e2e checks saved tempo stays 240."
  },
  {
   "id": "02-48",
   "file": "gaps/02-metronome.md",
   "title": "The speed trainer fails silently and only goes up",
-  "status": "open"
+  "status": "fixed",
+  "note": "Trainer goes up or down toward the target, warns when target equals tempo, and announces steps."
  },
  {
   "id": "02-49",
   "file": "gaps/02-metronome.md",
   "title": "Speed trainer modes are basic",
-  "status": "open"
+  "status": "fixed",
+  "note": "Steps in BPM or percent, every N bars or seconds, step patterns with negative steps, hold, loop or stop at the target."
  },
  {
   "id": "02-50",
   "file": "gaps/02-metronome.md",
   "title": "No pause and resume",
-  "status": "open"
+  "status": "fixed",
+  "note": "Pause keeps bar, seed and bars played; resume continues from the next bar; e2e checks it."
  },
  {
   "id": "02-51",
   "file": "gaps/02-metronome.md",
   "title": "No \"stop at end of bar\" and no bar-aligned start",
-  "status": "open"
+  "status": "fixed",
+  "note": "Stop button can finish the bar (press again to stop now); resume after pause starts on the next bar line; e2e checks it."
  },
  {
   "id": "02-52",
   "file": "gaps/02-metronome.md",
   "title": "Tempo presets as percentages of a target are missing",
-  "status": "open"
+  "status": "fixed",
+  "note": "Target tempo with 60, 70, 85 and 100 percent buttons in the tempo sheet."
  },
  {
   "id": "02-53",
   "file": "gaps/02-metronome.md",
   "title": "No snapping to traditional metronome marks",
-  "status": "open"
+  "status": "fixed",
+  "note": "Optional snapping of steps to traditional Maelzel marks (cited)."
  },
  {
   "id": "02-54",
   "file": "gaps/02-metronome.md",
   "title": "No tempo in dance units (bars per minute)",
-  "status": "open"
+  "status": "fixed",
+  "note": "Bars per minute display and input, with cited dance tempos (WDSF)."
  },
  {
   "id": "02-55",
   "file": "gaps/02-metronome.md",
   "title": "No milliseconds-per-note readout",
-  "status": "open"
+  "status": "fixed",
+  "note": "Milliseconds per note list in the tempo sheet."
  },
  {
   "id": "02-56",
   "file": "gaps/02-metronome.md",
   "title": "Tap timing uses the click event, which fires on release",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tap uses pointerdown and keydown event timestamps."
  },
  {
   "id": "02-57",
   "file": "gaps/02-metronome.md",
   "title": "Tap tempo cannot go below 30 BPM",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tap resets after 6.5 s, so tempos down to 10 BPM can be tapped."
  },
  {
   "id": "02-58",
   "file": "gaps/02-metronome.md",
   "title": "Tap tempo jumps on the second tap and has no outlier rejection",
-  "status": "open"
+  "status": "fixed",
+  "note": "Result from the third tap, 25 percent outlier rejection and a least-squares fit; jitter tests at 60, 120 and 240 BPM."
  },
  {
   "id": "02-59",
   "file": "gaps/02-metronome.md",
   "title": "Tapping does not set the beat phase",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: from the 4th tap while playing the beat phase aligns to the taps using output timestamps; not tested on hardware latency."
  },
  {
   "id": "02-60",
   "file": "gaps/02-metronome.md",
   "title": "MIDI or pedal tap only works on the metronome screen",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tap by key, MIDI or pedal works on every screen through the shared tap input."
  },
  {
   "id": "02-61",
   "file": "gaps/02-metronome.md",
   "title": "Holding a key repeats the action",
-  "status": "open"
+  "status": "fixed",
+  "note": "Key repeat is ignored for the tap and start/stop keys."
  },
  {
   "id": "02-62",
   "file": "gaps/02-metronome.md",
   "title": "No hands-free tap (clap into the mic or knock the phone)",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: clap to tap (spectral flux onsets) and knock to tap (motion sensor); not tested with real microphones or phones."
  },
  {
   "id": "02-63",
   "file": "gaps/02-metronome.md",
   "title": "No timing accuracy feedback against the click",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: timing check shows mean, spread, per beat and drift against scheduled beats, silent ones included; input latency only where the browser reports it, untested on hardware."
  },
  {
   "id": "02-64",
   "file": "gaps/02-metronome.md",
   "title": "No tempo detection from playing",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: listens 8 s and proposes a tempo with half and double choices (autocorrelation, unit tested on synthetic input); untested with real playing."
  },
  {
   "id": "02-65",
   "file": "gaps/02-metronome.md",
   "title": "Preset chips and dock controls are rebuilt every bar",
-  "status": "open"
+  "status": "fixed",
+  "note": "Preset chips, meter, badges and dock rebuild only when their content changes; e2e checks focus survives playing."
  },
  {
   "id": "02-66",
   "file": "gaps/02-metronome.md",
   "title": "Changing an accent loses focus and is not announced",
-  "status": "open"
+  "status": "fixed",
+  "note": "Accents update in place, focus stays, and the new level is announced."
  },
  {
   "id": "02-67",
   "file": "gaps/02-metronome.md",
   "title": "The count-in label talks to screen readers every beat",
-  "status": "open"
+  "status": "fixed",
+  "note": "Count-in label is hidden from screen readers; one live message says Count-in and Go."
  },
  {
   "id": "02-68",
   "file": "gaps/02-metronome.md",
   "title": "Subdivision and sound pickers lack names and arrow keys",
-  "status": "open"
+  "status": "fixed",
+  "note": "Segmented pickers have names, radio roles, roving tabindex and arrow, Home and End keys; e2e checks arrows."
  },
  {
   "id": "02-69",
   "file": "gaps/02-metronome.md",
   "title": "Space toggles the last clicked control instead of start/stop",
-  "status": "open"
+  "status": "fixed",
+  "note": "Space starts and stops unless a control has keyboard focus, then it presses that control."
  },
  {
   "id": "02-70",
   "file": "gaps/02-metronome.md",
   "title": "The dial has interactive controls inside a slider",
-  "status": "open"
+  "status": "fixed",
+  "note": "Slider role moved to the ring; the centre buttons and input sit beside it; e2e checks it."
  },
  {
   "id": "02-71",
   "file": "gaps/02-metronome.md",
   "title": "Beat blocks overflow at high beat counts on phones",
-  "status": "open"
+  "status": "fixed",
+  "note": "More than 8 beats wrap into two rows on narrow screens; e2e checks 16 beats fit at 360 px."
  },
  {
   "id": "02-72",
   "file": "gaps/02-metronome.md",
   "title": "The screen flash disappears for reduced-motion users",
-  "status": "open"
+  "status": "fixed",
+  "note": "Flash uses a class and timer instead of an animation, so it shows with reduced motion; e2e checks it."
  },
  {
   "id": "02-73",
   "file": "gaps/02-metronome.md",
   "title": "Full-screen flash has no photosensitivity limit",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: at most 3 flashes per second and only beat 1 above 180 BPM (WCAG 2.3.1), with a warning; no expert photosensitivity review."
  },
  {
   "id": "02-74",
   "file": "gaps/02-metronome.md",
   "title": "The accent flash differs only by colour",
-  "status": "open"
+  "status": "fixed",
+  "note": "Accent flash is stronger and longer, not only another colour; full, edge and small styles."
  },
  {
   "id": "02-75",
   "file": "gaps/02-metronome.md",
   "title": "The flash only works on the metronome screen",
-  "status": "open"
+  "status": "fixed",
+  "note": "Flash is installed app-wide and works on every screen."
  },
  {
   "id": "02-76",

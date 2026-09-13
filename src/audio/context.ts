@@ -10,6 +10,48 @@ const stateListeners = new Set<(state: AudioContextState | 'interrupted') => voi
  */
 export const LIMITER = { threshold: -3, knee: 0, ratio: 20, attack: 0.001, release: 0.1 };
 
+/** Highest sample the brickwall stage can output. */
+export const LIMITER_CEILING = 0.98;
+
+/**
+ * Curve for the brickwall stage after the compressor. A compressor lets the
+ * first milliseconds of a transient through, so this WaveShaper curve is the
+ * identity up to `knee` and bends smoothly to `LIMITER_CEILING` at full scale.
+ * A WaveShaper clamps input outside -1..1 to the end values, so no output
+ * sample can exceed the ceiling whatever goes in.
+ */
+export function limiterCurve(size = 4097, knee = 0.8, ceiling = LIMITER_CEILING): Float32Array {
+  const curve = new Float32Array(size);
+  const room = ceiling - knee;
+  for (let i = 0; i < size; i++) {
+    const x = (i / (size - 1)) * 2 - 1;
+    const a = Math.abs(x);
+    // tanh keeps the slope 1 at the knee, so the bend is not audible as a corner.
+    const y = a <= knee ? a : knee + room * Math.tanh((a - knee) / room);
+    curve[i] = Math.sign(x) * Math.min(ceiling, y);
+  }
+  return curve;
+}
+
+/** Master gain, compressor and brickwall stage into `out`. Used live and by offline peak tests. */
+export function buildMasterChain(c: BaseAudioContext, out: AudioNode): GainNode {
+  const gain = c.createGain();
+  const limiter = c.createDynamicsCompressor();
+  limiter.threshold.value = LIMITER.threshold;
+  limiter.knee.value = LIMITER.knee;
+  limiter.ratio.value = LIMITER.ratio;
+  limiter.attack.value = LIMITER.attack;
+  limiter.release.value = LIMITER.release;
+  const wall = c.createWaveShaper();
+  wall.curve = limiterCurve() as Float32Array<ArrayBuffer>;
+  // No oversampling: its resampling filter could ring past the ceiling.
+  wall.oversample = 'none';
+  gain.connect(limiter);
+  limiter.connect(wall);
+  wall.connect(out);
+  return gain;
+}
+
 /** Called when the audio context is suspended, interrupted (a phone call) or resumes. */
 export function onContextState(fn: (state: AudioContextState | 'interrupted') => void): () => void {
   stateListeners.add(fn);
@@ -22,15 +64,7 @@ let micPending: Promise<MediaStream> | null = null;
 export function getContext(): AudioContext {
   if (!ctx) {
     ctx = new AudioContext({ latencyHint: 'interactive' });
-    master = ctx.createGain();
-    const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = LIMITER.threshold;
-    limiter.knee.value = LIMITER.knee;
-    limiter.ratio.value = LIMITER.ratio;
-    limiter.attack.value = LIMITER.attack;
-    limiter.release.value = LIMITER.release;
-    master.connect(limiter);
-    limiter.connect(ctx.destination);
+    master = buildMasterChain(ctx, ctx.destination);
     const c = ctx;
     c.addEventListener('statechange', () => stateListeners.forEach((fn) => fn(c.state as AudioContextState | 'interrupted')));
   }
