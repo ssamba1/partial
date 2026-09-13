@@ -1,91 +1,67 @@
 # Resonare: design
 
-Free, open-source (MIT) practice app for musicians covering the same ground as
-TonalEnergy's TE Tuner & Metronome: tuner, metronome, drone / tone generator,
-click tracks, recording, pitch analysis, and PDF sheet music. "Resonare" is a
-working name.
+Free, open-source (MIT) practice studio covering and extending what TonalEnergy's
+TE Tuner & Metronome offers. "Resonare" is a working name.
 
-Approved direction (chat, 2026-09-12): approach A, one web app (installable PWA)
-on a shared audio core, every feature in scope, built in milestones. v1 goal for
-"better" is: everything free, no accounts, no paywall, no tracking.
+Direction agreed in chat on 2026-09-12: one installable web app on a shared audio
+core, every feature in scope. On 2026-09-12 and 2026-09-13 the interface was
+redesigned after studying TE's documented interaction patterns (user guide), App
+Store reviews, other tuner and metronome apps, and the UI work in Sri's other
+repositories. Visual assets were not copied; interaction ideas were.
 
-## Non-goals for this build
+## Non-goals
 
-- No backend, no accounts, no sync. All data stays in the browser (IndexedDB /
-  localStorage).
-- No native mobile wrappers yet. The core is framework-free TypeScript so a
-  Capacitor or Tauri wrapper can be added later without rewriting it.
-- No claim of accuracy beyond what the test suite measures.
+- No backend, no accounts, no sync. Data stays in the browser (localStorage and
+  IndexedDB), with JSON backup and CSV export.
+- No native wrappers yet. `src/core` is framework-free so a Capacitor or Tauri
+  shell can be added later.
+- Not implemented: Ableton Link (no browser API), spoken count-in (no recorded
+  voice), pitch-shifting of recordings, Apple Watch.
 
 ## Architecture
 
 ```
-src/
-  core/        pure logic, no DOM, unit tested
-    notes.ts       frequency <-> note, cents, A4 calibration, temperaments, transposition
-    pitch.ts       YIN pitch detector over a Float32Array frame
-    rhythm.ts      meter / subdivision / accent patterns, click-track timeline expansion
-    spectrum.ts    FFT magnitude spectrum, harmonic peak picking
-    format.ts      small formatting helpers
-  audio/       Web Audio glue, thin wrappers around core
-    context.ts     shared AudioContext, mic stream
-    scheduler.ts   lookahead scheduler (setTimeout wakeups, AudioContext time for events)
-    voices.ts      click sounds and sustained tone voices (oscillators + envelopes)
-    analyser.ts    mic frames -> pitch / spectrum readings
-  store/
-    settings.ts    persisted user settings
-    recordings.ts  IndexedDB storage for recordings and sheet-music PDFs
-  ui/
-    router.ts      hash router
-    dom.ts         tiny element helper
-    views/         one file per feature screen
-  main.ts
-public/            manifest, icons, service worker
-tests/             vitest, core only
+src/core/    pure logic, unit tested
+  notes        frequency and note math, temperaments (incl. Werckmeister III, Vallotti, Young II), notation
+  pitch        YIN with early exit at the first dip, smoother
+  rhythm       meters, click tracks, section spans, gap and random muting, polyrhythm, tempo names
+  intervals    interval naming and equal/just deviation
+  intonation   strobe phase, tendencies, held-note segmentation, offline take reports
+  exercises    scale and arpeggio sequences
+  instruments  string tunings, pure fifths, nearest string
+  staff        staff positions and ledger lines
+  ink          annotation geometry, half-page turn state
+  midi, gestures, spectrum, practice, format
+src/audio/   Web Audio: context and mic, lookahead scheduler, metronome engine,
+             click and timbre synthesis, drone bank, pitch tracker with click gating
+src/store/   settings (localStorage), recordings, scores and annotations (IndexedDB)
+src/ui/      components (segmented, dial, hold button, sheet, toast), icons,
+             pitch ring, tuning sheet, global controls (shortcuts, MIDI, announcements),
+             one file per screen
+scripts/e2e.mjs  headless Chromium checks with a synthesized microphone
+public/      manifest, icons, service worker (build id stamped at build time)
 ```
 
-Boundaries: `core` never imports from `audio`, `store`, or `ui`. Every view talks
-to audio through `audio/*` functions and to persistence through `store/*`.
+Boundaries: `core` imports nothing from `audio`, `store` or `ui`.
 
-## Features and milestones
+## Key design decisions
 
-1. **Tuner.** Mic in, YIN detection, needle and cents readout, note name,
-   frequency, A4 reference (400-480 Hz), transposition (C, Bb, Eb, F, G, A),
-   temperaments (equal, just, Pythagorean, meantone quarter-comma) relative to a
-   chosen tonic, adjustable in-tune tolerance, pitch trace of the last seconds.
-2. **Metronome.** 20-400 BPM, any meter n/d, subdivisions (1-4 plus triplet
-   feel via 3), per-beat accent levels (accent, normal, silent), tap tempo,
-   several click sounds, visual beat indicator. Events scheduled on the
-   AudioContext clock with lookahead so timing does not depend on UI jank.
-3. **Drone / tone generator.** Sustained pitches for any note and octave,
-   several waveforms, multiple simultaneous drones (intervals, chords), volume,
-   follows tuner temperament and A4.
-4. **Click tracks.** Ordered sections, each with bars, tempo, meter, optional
-   tempo ramp to the next section, count-in. Expanded by `rhythm.ts` into a
-   timeline the scheduler plays. Saved locally.
-5. **Recording.** MediaRecorder capture, list, play, rename, delete, download,
-   optional metronome while recording. Stored in IndexedDB.
-6. **Analysis.** Live waveform, spectrum with harmonic markers, pitch-over-time
-   graph with in-tune band.
-7. **Sheet music.** Import PDFs (stored locally), page view with pdf.js, page
-   turns by button / keyboard / foot pedal keys, metronome and tuner overlay.
+- Semantic colour is fixed app-wide: green in tune, amber sharp, blue flat,
+  violet brand. States are also written in words so colour is never the only
+  signal. Text colours were measured against WCAG 4.5:1.
+- The metronome is one shared engine, reachable from a dock on every screen, and
+  the tuner ignores audio around each scheduled click (addresses the TE review
+  complaint that the tuner hears the metronome).
+- Tuner steadiness modes and a short hold through dropouts address the "jumpy
+  readout" complaint.
+- Every hold-to-repeat control also works with a single tap, and every long
+  feature has a visible entry point, to avoid hidden gestures.
 
-## Error handling
+## Verification
 
-- Mic permission denied or unavailable: the view shows a clear message and a
-  retry button, the rest of the app keeps working.
-- AudioContext must start from a user gesture: every audio feature has an
-  explicit start button.
-- IndexedDB unavailable (private mode): recordings / PDFs show an error, other
-  features unaffected.
-- Detector returns `null` when the signal is too quiet or aperiodic; the UI
-  shows "listening" instead of a guessed note.
-
-## Testing
-
-- vitest on `core/`: pitch detection on synthesized tones across the range with
-  measured cents error, harmonics-rich tones (octave-error check), noise returns
-  null; note math and temperaments against hand-computed values; rhythm
-  expansion (event times for meters, subdivisions, ramps).
-- `tsc --noEmit` type check and `vite build` must pass.
-- Manual browser check of each screen via the in-app browser.
+- `npm test`: unit tests on all of `src/core`.
+- `npm run e2e`: builds and drives the app in headless Chromium (screens render,
+  tuner readings, metronome timing, preset drones, interval trainer, recording
+  report, sheet music annotation and half turns, score tempo memory, offline).
+- Not verified: real instruments and microphones, phone audio latency, Safari
+  and Firefox.
