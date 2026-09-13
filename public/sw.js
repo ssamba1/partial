@@ -16,7 +16,8 @@ self.addEventListener('install', (event) => {
       } catch {
         // Dev server or missing list: assets are cached as they are fetched instead.
       }
-      await self.skipWaiting();
+      // No skipWaiting: a new version waits until old tabs close, so an open tab never
+      // loses the lazily loaded chunks of the version it started with.
     })(),
   );
 });
@@ -38,8 +39,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('./index.html', copy));
+          // Never let an error page (404, captive portal, 5xx) replace the offline copy.
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('./index.html', copy));
+          }
           return res;
         })
         .catch(() => caches.match('./index.html', { ignoreVary: true })),

@@ -314,7 +314,11 @@ function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElemen
   const playBtn = h('button', { class: 'transport-play', 'aria-label': 'Play exercise', onclick: () => void toggle() }, icon('play', 20));
   const s0 = getSettings();
 
+  let starting = false;
+  let cancelled = false;
+
   function stop() {
+    cancelled = true;
     scheduler?.stop();
     finish();
   }
@@ -322,16 +326,21 @@ function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElemen
   function finish() {
     playBtn.replaceChildren(icon('play', 20));
     onNote(null);
-    if (droneMidi !== null) {
-      noteOff(droneMidi);
-      droneMidi = null;
-    }
+    // Only stop the root drone if the exercise started it; a drone the user was already playing stays on.
+    if (droneMidi !== null) noteOff(droneMidi);
+    droneMidi = null;
     status.textContent = '';
   }
 
   async function toggle() {
-    if (scheduler?.isRunning) return stop();
+    if (scheduler?.isRunning || starting) return stop();
+    starting = true;
+    cancelled = false;
     const ctx = await ensureRunning();
+    if (cancelled) {
+      starting = false;
+      return;
+    }
     scheduler ??= new LookaheadScheduler(ctx);
     const root = (octave + 1) * 12 + rootPc;
     const notes = buildExercise(pattern, root, octaves, direction);
@@ -340,9 +349,16 @@ function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElemen
     const s = getSettings();
     const tuning = tuningOf(s);
     if (droneOn) {
-      droneMidi = root - 12;
-      await noteOn(droneMidi);
+      const midi = root - 12;
+      const created = await noteOn(midi);
+      if (cancelled) {
+        if (created) noteOff(midi);
+        starting = false;
+        return;
+      }
+      droneMidi = created ? midi : null;
     }
+    starting = false;
     let i = 0;
     const lead = 2; // two clicks of count-in so you can come in
     playBtn.replaceChildren(icon('stop', 18));
@@ -400,5 +416,11 @@ function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElemen
     ),
     h('div', { class: 'exercise-transport' }, playBtn, status),
   );
-  return { el, dispose: stop };
+  return {
+    el,
+    dispose: () => {
+      loop = false;
+      stop();
+    },
+  };
 }

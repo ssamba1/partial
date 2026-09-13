@@ -302,8 +302,8 @@ export function mountMetronome(root: HTMLElement) {
   const flash = h('div', { class: 'screen-flash', 'aria-hidden': 'true' });
 
   function toggle() {
-    if (metronome.playing) metronome.stop();
-    else void metronome.start();
+    // The engine's toggle also cancels a start that is still waiting for the audio context.
+    metronome.toggle();
   }
 
   function tap() {
@@ -482,6 +482,9 @@ export function mountMetronome(root: HTMLElement) {
 
   const onKey = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    // Let focused buttons and open panels handle their own keys.
+    if (document.querySelector('.sheet-layer.open')) return;
+    if (e.target instanceof HTMLButtonElement && (e.code === 'Space' || e.key === 'Enter')) return;
     if (e.code === 'Space') {
       e.preventDefault();
       toggle();

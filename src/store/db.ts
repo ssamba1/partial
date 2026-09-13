@@ -55,7 +55,20 @@ function open(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains('scores')) db.createObjectStore('scores', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('annotations')) db.createObjectStore('annotations', { keyPath: 'id' }).createIndex('scoreId', 'scoreId');
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onblocked = () => {
+        // Another tab still has the old database version open.
+        dbPromise = null;
+        reject(new Error('Resonare is open in another tab with an older version. Close that tab and try again.'));
+      };
+      req.onsuccess = () => {
+        const database = req.result;
+        // Let a newer version in another tab upgrade: close this connection and reopen on next use.
+        database.onversionchange = () => {
+          database.close();
+          dbPromise = null;
+        };
+        resolve(database);
+      };
       req.onerror = () => {
         dbPromise = null;
         reject(req.error ?? new Error('Could not open local database.'));

@@ -2,6 +2,7 @@ let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let micStream: MediaStream | null = null;
 let micUsers = 0;
+let micPending: Promise<MediaStream> | null = null;
 
 export function getContext(): AudioContext {
   if (!ctx) {
@@ -39,20 +40,22 @@ export async function acquireMic(): Promise<MediaStream> {
     throw new MicError('This browser does not provide microphone access.', 'unavailable');
   }
   if (!micStream || micStream.getAudioTracks().every((t) => t.readyState === 'ended')) {
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      });
-    } catch (err) {
-      const name = (err as DOMException)?.name;
-      if (name === 'NotAllowedError' || name === 'SecurityError') {
-        throw new MicError('Microphone permission was denied. Allow it in the browser and try again.', 'denied');
-      }
-      throw new MicError('No microphone could be opened.', 'unavailable');
-    }
+    // Share one in-flight request so two callers starting at once get the same stream.
+    micPending ??= navigator.mediaDevices
+      .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .then((s) => (micStream = s))
+      .catch((err) => {
+        const name = (err as DOMException)?.name;
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+          throw new MicError('Microphone permission was denied. Allow it in the browser and try again.', 'denied');
+        }
+        throw new MicError('No microphone could be opened.', 'unavailable');
+      })
+      .finally(() => (micPending = null));
+    await micPending;
   }
   micUsers++;
-  return micStream;
+  return micStream!;
 }
 
 export function releaseMic(): void {

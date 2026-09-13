@@ -14,16 +14,14 @@ metronome.onState((playing) => {
     metronomeStartedAt = performance.now();
     return;
   }
-  logPractice((performance.now() - metronomeStartedAt) / 1000, 'metronome');
-  // Persist the tempo reached by the speed trainer.
-  updateSettings((s) => ({ metronome: { ...s.metronome, bpm: metronome.settings.bpm } }));
+  if (metronomeStartedAt) logPractice((performance.now() - metronomeStartedAt) / 1000, 'metronome');
+  metronomeStartedAt = 0;
 });
 
-// Keep the settings in sync when the speed trainer raises the tempo.
-metronome.onBeat((e) => {
-  if (e.sub === 0 && e.beat === 0 && getSettings().metronome.bpm !== metronome.settings.bpm) {
-    updateSettings((s) => ({ metronome: { ...s.metronome, bpm: metronome.settings.bpm } }));
-  }
+// Write speed-trainer tempo changes to settings the moment they happen, so no
+// other settings write in between can push the old tempo back into the engine.
+metronome.onTempo((bpm) => {
+  updateSettings((s) => ({ metronome: { ...s.metronome, bpm } }));
 });
 
 subscribeSettings((s) => {

@@ -42,6 +42,9 @@ function mono(buffer: AudioBuffer): Float32Array {
 export function mountRecorder(root: HTMLElement) {
   let recorder: MediaRecorder | null = null;
   let starting = false;
+  let disposed = false;
+  /** Only stop the metronome at the end of a take if this take started it. */
+  let startedMetronome = false;
   let startedAt = 0;
   let timer = 0;
   let meterRaf = 0;
@@ -77,6 +80,12 @@ export function mountRecorder(root: HTMLElement) {
     try {
       const ctx = await ensureRunning();
       stream = await acquireMic();
+      if (disposed) {
+        // Left the screen while the permission prompt was up.
+        releaseMic();
+        starting = false;
+        return;
+      }
       sourceNode = ctx.createMediaStreamSource(stream);
       analyser = ctx.createAnalyser();
       analyser.fftSize = 1024;
@@ -97,6 +106,11 @@ export function mountRecorder(root: HTMLElement) {
         toast('Camera unavailable, recording audio only');
         camStream = null;
       }
+      if (disposed) {
+        starting = false;
+        teardown();
+        return;
+      }
     }
     starting = false;
     const mime = pickMime(!!camStream);
@@ -112,7 +126,8 @@ export function mountRecorder(root: HTMLElement) {
     rec.start(1000);
     startedAt = recStartedAt;
     levels.length = 0;
-    if (withClick.checked && !metronome.playing) void metronome.start();
+    startedMetronome = withClick.checked && !metronome.playing;
+    if (startedMetronome) void metronome.start();
     view.classList.add('recording');
     recState.textContent = 'Recording';
     recBtn.setAttribute('aria-label', 'Stop recording');
@@ -175,7 +190,8 @@ export function mountRecorder(root: HTMLElement) {
     if (recorder === rec) {
       recorder = null;
       teardown();
-      if (withClick.checked) metronome.stop();
+      if (startedMetronome) metronome.stop();
+      startedMetronome = false;
       time.textContent = '0:00';
     }
     logPractice(duration, 'record');
@@ -408,8 +424,9 @@ export function mountRecorder(root: HTMLElement) {
   void renderList();
 
   return () => {
+    disposed = true;
     if (recorder && recorder.state !== 'inactive') recorder.stop();
-    else teardown();
+    else if (!starting) teardown();
     document.querySelectorAll<HTMLMediaElement>('.take audio, .take video').forEach((a) => a.pause());
     urls.forEach((u) => URL.revokeObjectURL(u));
   };

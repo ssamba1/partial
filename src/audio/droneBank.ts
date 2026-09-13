@@ -32,13 +32,18 @@ export function isOn(midi: number): boolean {
   return active.has(midi);
 }
 
-export async function noteOn(midi: number): Promise<void> {
-  if (active.has(midi)) return;
+/**
+ * Starts a drone. Resolves true only if this call created it, so features that
+ * add a drone (exercises, follow-drone) know whether they own it and may stop it.
+ */
+export async function noteOn(midi: number): Promise<boolean> {
+  if (active.has(midi)) return false;
   const ctx = await ensureRunning();
-  if (active.has(midi)) return;
+  if (active.has(midi)) return false;
   const s = getSettings();
   active.set(midi, new Drone(ctx, getMaster(), midiToFrequency(midi, tuningOf(s)), s.drone.timbre, s.drone.volume));
   notify();
+  return true;
 }
 
 export function noteOff(midi: number): void {

@@ -58,10 +58,26 @@ export class PitchTracker {
     return () => this.listeners.delete(fn);
   }
 
-  async start(): Promise<void> {
-    if (this.running) return;
+  private starting: Promise<void> | null = null;
+  /** False once stop() is called, so a start that is still awaiting permission backs out. */
+  private wanted = false;
+
+  start(): Promise<void> {
+    this.wanted = true;
+    if (this.running) return Promise.resolve();
+    this.starting ??= this.doStart().finally(() => (this.starting = null));
+    return this.starting;
+  }
+
+  private async doStart(): Promise<void> {
     const ctx = await ensureRunning();
+    if (!this.wanted) return;
     const stream = await acquireMic();
+    if (!this.wanted) {
+      // The view was stopped or closed while the permission prompt was up.
+      releaseMic();
+      return;
+    }
     this.source = ctx.createMediaStreamSource(stream);
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 4096;
@@ -129,6 +145,7 @@ export class PitchTracker {
   }
 
   stop(): void {
+    this.wanted = false;
     if (!this.running) return;
     this.running = false;
     cancelAnimationFrame(this.raf);

@@ -58,6 +58,8 @@ export function mountClickTrack(root: HTMLElement) {
   let playStartAudio = 0;
   let loop = false;
   let raf = 0;
+  let starting = false;
+  let disposed = false;
 
   const library = h('div', { class: 'track-chips' });
   const nameInput = h('input', {
@@ -261,8 +263,16 @@ export function mountClickTrack(root: HTMLElement) {
       stop();
       return;
     }
+    // A second tap while the audio context is starting cancels the first.
+    if (starting) {
+      starting = false;
+      return;
+    }
+    starting = true;
     metronome.stop();
     const ctx = await ensureRunning();
+    if (!starting || disposed) return;
+    starting = false;
     scheduler ??= new LookaheadScheduler(ctx);
     const { events, duration } = expandClickTrack(track);
     let i = 0;
@@ -365,6 +375,8 @@ export function mountClickTrack(root: HTMLElement) {
   window.addEventListener('keydown', onKey);
 
   return () => {
+    disposed = true;
+    starting = false;
     window.removeEventListener('keydown', onKey);
     stop();
   };

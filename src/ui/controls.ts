@@ -14,7 +14,8 @@ function typingTarget(t: EventTarget | null): boolean {
 export function installGlobalShortcuts(routes: string[], openHelp: () => void): void {
   window.addEventListener('keydown', (e) => {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || typingTarget(e.target)) return;
-    if (document.querySelector('.sheet-layer')) return;
+    // Only while a panel is actually open, not during its closing animation.
+    if (document.querySelector('.sheet-layer.open')) return;
     const key = e.key.toLowerCase();
     const route = location.hash.replace(/^#\/?/, '');
     if (key === 'm' && route !== 'metronome') {

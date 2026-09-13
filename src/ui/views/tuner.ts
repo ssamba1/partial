@@ -100,6 +100,7 @@ export function mountTuner(root: HTMLElement) {
   let lockedFired = false;
   let refDrone: { drone: Drone; index: number; timeout: number } | null = null;
   let manualString: number | null = null;
+  let disposed = false;
 
   /* ----- Display elements ----- */
   const ring = createPitchRing();
@@ -239,14 +240,19 @@ export function mountTuner(root: HTMLElement) {
 
   /* ----- Drone that follows you ----- */
   let followMidi: number | null = null;
+  /** Whether the follow drone created its current note (a user-started drone on the same note is left alone). */
+  let followOwned = false;
   let candidateMidi: number | null = null;
   let candidateSince = 0;
+  function stopFollow() {
+    if (followMidi !== null && followOwned) noteOff(followMidi);
+    followMidi = null;
+    followOwned = false;
+    candidateMidi = null;
+  }
   function followNote(concertMidi: number | null, time: number) {
     if (!getSettings().followDrone) {
-      if (followMidi !== null) {
-        noteOff(followMidi);
-        followMidi = null;
-      }
+      stopFollow();
       return;
     }
     if (concertMidi === null) return;
@@ -256,9 +262,14 @@ export function mountTuner(root: HTMLElement) {
       return;
     }
     if (time - candidateSince >= 0.35 && followMidi !== concertMidi) {
-      if (followMidi !== null) noteOff(followMidi);
-      followMidi = concertMidi;
-      void noteOn(concertMidi);
+      if (followMidi !== null && followOwned) noteOff(followMidi);
+      const midi = concertMidi;
+      followMidi = midi;
+      followOwned = false;
+      void noteOn(midi).then((created) => {
+        if (followMidi === midi) followOwned = created;
+        else if (created) noteOff(midi); // moved on to another note while this one was starting
+      });
     }
   }
 
@@ -327,6 +338,9 @@ export function mountTuner(root: HTMLElement) {
       }
     }
     const ctx = await ensureRunning();
+    if (disposed) return;
+    // A second tap may have started a reference while this one was waiting; replace it rather than leak it.
+    if (refDrone) stopRef();
     const drone = new Drone(ctx, getMaster(), stringFrequency(inst, i, tuningOf(s), s.pureFifths), 'strings', 0.7);
     refDrone = { drone, index: i, timeout: window.setTimeout(stopRef, 4000) };
     renderStrings(i, null);
@@ -346,6 +360,7 @@ export function mountTuner(root: HTMLElement) {
     if (tracker.running) {
       tracker.stop();
       timer.stop();
+      stopFollow();
       root.querySelector('.tuner')?.classList.remove('listening');
       hint.textContent = 'Tap to start';
       freqEl.replaceChildren(h('span', null, 'Paused'));
@@ -580,6 +595,7 @@ export function mountTuner(root: HTMLElement) {
     timer.stop();
     window.clearInterval(flushTimer);
     flushTendencies();
-    if (followMidi !== null) noteOff(followMidi);
+    stopFollow();
+    disposed = true;
   };
 }

@@ -187,6 +187,45 @@ await check('metronome schedules exact 100 BPM triplets', async () => {
   return `${gaps.length} gaps of 0.2 s`;
 });
 
+await check('metronome: a quick double tap leaves it stopped', async () => {
+  await open('metronome');
+  const out = await run(`
+    const btn = document.querySelector('.play-btn');
+    btn.click(); btn.click();
+    await new Promise((r) => setTimeout(r, 1000));
+    return document.querySelector('.metronome').classList.contains('playing');`);
+  assert(out === false, 'metronome still playing after start+stop taps');
+  return 'stopped';
+});
+
+await check('speed trainer tempo survives other settings writes', async () => {
+  await open('metronome');
+  const out = await run(`
+    const k = 'resonare.settings.v1';
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const s = JSON.parse(localStorage.getItem(k));
+    s.metronome = { ...s.metronome, bpm: 240, beatsPerBar: 2, subdivision: 1, accents: ['accent', 'normal'], trainerBars: 1, trainerStep: 5, trainerMax: 300 };
+    localStorage.setItem(k, JSON.stringify(s));
+    location.reload();`).catch(() => null);
+  await sleep(1500);
+  const result = await run(`
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    document.querySelector('.play-btn').click();
+    // Hammer unrelated settings writes while the trainer is stepping.
+    for (let i = 0; i < 25; i++) { document.querySelector('[aria-label="Metronome volume"]').dispatchEvent(new Event('input')); await wait(100); }
+    document.querySelector('.play-btn').click(); await wait(200);
+    const saved = JSON.parse(localStorage.getItem('resonare.settings.v1')).metronome;
+    const shown = Number(document.querySelector('.bpm-input').value);
+    // restore defaults for later checks
+    saved.trainerBars = 0; saved.bpm = 100; saved.beatsPerBar = 4; saved.accents = ['accent','normal','normal','normal'];
+    const all = JSON.parse(localStorage.getItem('resonare.settings.v1')); all.metronome = saved; localStorage.setItem('resonare.settings.v1', JSON.stringify(all));
+    return { shown };`);
+  // 2.5 s at 240+ BPM in 2/4 is about 2.5 bars per second... expect several +5 steps.
+  assert(result.shown >= 255, `tempo only reached ${result.shown}`);
+  assert((result.shown - 240) % 5 === 0, `unexpected tempo ${result.shown}`);
+  return `reached ${result.shown} BPM`;
+});
+
 await check('metronome preset saves and restores its drone', async () => {
   await open('sound');
   const out = await run(`

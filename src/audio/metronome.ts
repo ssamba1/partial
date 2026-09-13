@@ -75,8 +75,24 @@ export class Metronome {
     this.clickCursor = (this.clickCursor + 1) % this.recentClicks.length;
   }
 
+  private pendingStart = false;
+  private startToken = 0;
+  private tempoListeners = new Set<(bpm: number) => void>();
+
+  /** Fires when the engine itself changes tempo (speed trainer). */
+  onTempo(fn: (bpm: number) => void): () => void {
+    this.tempoListeners.add(fn);
+    return () => this.tempoListeners.delete(fn);
+  }
+
   async start(): Promise<void> {
+    if (this.playing || this.pendingStart) return;
+    this.pendingStart = true;
+    const token = ++this.startToken;
     const ctx = await ensureRunning();
+    this.pendingStart = false;
+    // stop() was called while the audio context was starting.
+    if (token !== this.startToken) return;
     this.scheduler ??= new LookaheadScheduler(ctx);
     this.barsPlayed = 0;
     this.seed = (Math.random() * 1e9) | 0;
@@ -156,17 +172,23 @@ export class Metronome {
     const s = this.settings;
     if (s.trainerBars > 0 && this.barsPlayed % s.trainerBars === 0 && s.bpm < s.trainerMax) {
       this.update({ bpm: Math.min(s.trainerMax, s.bpm + s.trainerStep) });
+      this.tempoListeners.forEach((fn) => fn(this.settings.bpm));
     }
   }
 
   stop(): void {
+    if (this.pendingStart) {
+      this.startToken++;
+      this.pendingStart = false;
+      return;
+    }
     if (!this.playing) return;
     this.scheduler?.stop();
     this.stateListeners.forEach((fn) => fn(false));
   }
 
   toggle(): void {
-    if (this.playing) this.stop();
+    if (this.playing || this.pendingStart) this.stop();
     else void this.start();
   }
 }
