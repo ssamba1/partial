@@ -3574,6 +3574,20 @@ canvas.live-wave {
 .section-head {
   margin: 26px 2px 8px;
 }
+video.rec-preview {
+  width: min(100%, 420px);
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius);
+  background: #000;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+video.take-video {
+  width: 100%;
+  max-height: 420px;
+  border-radius: var(--radius);
+  background: #000;
+}
 .take-list {
   display: flex;
   flex-direction: column;

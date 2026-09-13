@@ -10,13 +10,16 @@ import { cssVar, errorBox, fitCanvas, h } from '../dom';
 import { icon } from '../icons';
 import { metronome } from '../shared';
 
-function pickMime(): string {
-  const candidates = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm'];
+function pickMime(video: boolean): string {
+  const candidates = video
+    ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+    : ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm'];
   return candidates.find((m) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)) ?? '';
 }
 
 function extensionFor(mime: string): string {
   if (mime.includes('ogg')) return 'ogg';
+  if (mime.startsWith('video/mp4')) return 'mp4';
   if (mime.includes('mp4')) return 'm4a';
   return 'webm';
 }
@@ -51,6 +54,9 @@ export function mountRecorder(root: HTMLElement) {
   const time = h('div', { class: 'rec-time' }, '0:00');
   const liveWave = h('canvas', { class: 'live-wave', 'aria-hidden': 'true' });
   const withClick = h('input', { type: 'checkbox', role: 'switch', id: 'rec-click' });
+  const withVideo = h('input', { type: 'checkbox', role: 'switch', id: 'rec-video' });
+  const preview = h('video', { class: 'rec-preview', muted: true, playsInline: true, autoplay: true, hidden: true }) as HTMLVideoElement;
+  let camStream: MediaStream | null = null;
   const errorSlot = h('div');
   const list = h('div', { class: 'take-list' });
   const recState = h('div', { class: 'rec-state' }, 'Ready');
@@ -76,13 +82,25 @@ export function mountRecorder(root: HTMLElement) {
       analyser.fftSize = 1024;
       sourceNode.connect(analyser);
     } catch (err) {
+      starting = false;
       errorSlot.append(errorBox(err instanceof MicError ? err.message : 'Could not open the microphone.', () => void toggle()));
       return;
-    } finally {
-      starting = false;
     }
-    const mime = pickMime();
-    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    let recordStream = stream;
+    if (withVideo.checked) {
+      try {
+        camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } });
+        recordStream = new MediaStream([...camStream.getVideoTracks(), ...stream.getAudioTracks()]);
+        preview.srcObject = camStream;
+        preview.hidden = false;
+      } catch {
+        toast('Camera unavailable, recording audio only');
+        camStream = null;
+      }
+    }
+    starting = false;
+    const mime = pickMime(!!camStream);
+    const rec = new MediaRecorder(recordStream, mime ? { mimeType: mime } : undefined);
     const recChunks: Blob[] = [];
     const recStartedAt = performance.now();
     rec.ondataavailable = (e) => {
@@ -140,6 +158,10 @@ export function mountRecorder(root: HTMLElement) {
     }
     analyser = null;
     sourceNode = null;
+    camStream?.getTracks().forEach((t) => t.stop());
+    camStream = null;
+    preview.srcObject = null;
+    preview.hidden = true;
     levels.length = 0;
     drawLive();
     view.classList.remove('recording');
@@ -182,7 +204,10 @@ export function mountRecorder(root: HTMLElement) {
   function takeCard(item: RecordingEntry): HTMLElement {
     const url = URL.createObjectURL(item.blob);
     urls.add(url);
-    const audio = h('audio', { src: url, preload: 'metadata' }) as HTMLAudioElement;
+    const isVideo = item.mime.startsWith('video/');
+    const audio = (isVideo
+      ? h('video', { src: url, preload: 'metadata', playsInline: true, class: 'take-video' })
+      : h('audio', { src: url, preload: 'metadata' })) as HTMLMediaElement;
     audio.preservesPitch = true;
     const playBtn = h('button', { class: 'take-play', 'aria-label': `Play ${item.name}` }, icon('play', 18));
     const progress = h('input', { type: 'range', min: 0, max: 1000, value: '0', class: 'take-progress', 'aria-label': 'Playback position' }) as HTMLInputElement;
@@ -191,7 +216,7 @@ export function mountRecorder(root: HTMLElement) {
 
     playBtn.addEventListener('click', () => {
       if (audio.paused) {
-        document.querySelectorAll('audio').forEach((a) => a !== audio && a.pause());
+        document.querySelectorAll<HTMLMediaElement>('.take audio, .take video').forEach((a) => a !== audio && a.pause());
         void audio.play();
       } else audio.pause();
     });
@@ -261,6 +286,7 @@ export function mountRecorder(root: HTMLElement) {
       'article',
       { class: 'take' },
       h('div', { class: 'take-head' }, name, h('span', { class: 'muted small' }, `${formatDuration(item.duration)} · ${new Date(item.created).toLocaleDateString()}`)),
+      isVideo ? audio : null,
       h('div', { class: 'take-player' }, playBtn, progress, clock),
       h(
         'div',
@@ -280,7 +306,7 @@ export function mountRecorder(root: HTMLElement) {
         ),
       ),
       analysisSlot,
-      audio,
+      isVideo ? null : audio,
     );
   }
 
@@ -369,6 +395,8 @@ export function mountRecorder(root: HTMLElement) {
       recBtn,
       time,
       liveWave,
+      preview,
+      h('label', { class: 'switch-row compact', for: 'rec-video' }, h('span', null, h('strong', null, 'Record video'), h('small', null, 'Film your posture and bowing along with the sound.')), withVideo),
       h('label', { class: 'switch-row compact', for: 'rec-click' }, h('span', null, h('strong', null, 'Metronome while recording'), h('small', null, 'Use headphones so the click stays out of the take.')), withClick),
     ),
     errorSlot,
@@ -382,7 +410,7 @@ export function mountRecorder(root: HTMLElement) {
   return () => {
     if (recorder && recorder.state !== 'inactive') recorder.stop();
     else teardown();
-    document.querySelectorAll('.take audio').forEach((a) => (a as HTMLAudioElement).pause());
+    document.querySelectorAll<HTMLMediaElement>('.take audio, .take video').forEach((a) => a.pause());
     urls.forEach((u) => URL.revokeObjectURL(u));
   };
 }
