@@ -125,6 +125,10 @@ function openHelp() {
       'div',
       { class: 'stack' },
       row(['Space'], 'Start or stop the tuner, metronome, click track or analysis on the current screen'),
+      row(['Enter'], 'Tuner: play the target of the last note'),
+      row(['R', 'B', 'S'], 'Tuner: ring, bar or strobe display'),
+      row(['[', ']'], 'Tuner: lower or raise A4 by 0.5 Hz'),
+      row(['←', '→'], 'Tuner strings mode: previous or next string'),
       row(['M'], 'Metronome on or off from any screen'),
       row(['D'], 'Stop all drones'),
       row(['1', '9'], 'Jump to a screen, in the order of the menu'),
@@ -182,7 +186,11 @@ metronome.onBeat((e) => {
   [...dockBeats.children].forEach((c, i) => c.classList.toggle('on', i === e.beat));
   if (e.beat === 0) renderDock();
 });
-onDronesChange(renderDock);
+onDronesChange(() => {
+  renderDock();
+  // The key can follow the lowest drone.
+  renderTuningChip();
+});
 subscribeSettings(() => {
   renderDock();
   renderTuningChip();

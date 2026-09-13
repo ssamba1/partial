@@ -1255,6 +1255,42 @@ button.link {
   font: 700 1.9rem var(--font-display);
   font-variant-numeric: tabular-nums;
 }
+input.a4-value {
+  width: 7ch;
+  min-width: 0;
+  text-align: center;
+  background: transparent;
+  border: 1px solid var(--surface-3);
+  border-radius: 8px;
+  color: var(--text);
+}
+.a4-group {
+  align-items: center;
+}
+.a4-group > span {
+  min-width: 5.5em;
+}
+.preset-chip {
+  display: inline-flex;
+  padding: 0;
+  overflow: hidden;
+}
+.preset-chip button {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.preset-chip .chip-x {
+  padding-left: 4px;
+  color: var(--muted);
+}
+.error-box .mic-help {
+  margin: 8px 0 0;
+  padding-left: 1.3em;
+}
 
 /* ============================================================
    Tuner
@@ -1351,6 +1387,12 @@ button.link {
 .pitch-ring.idle .ring-tip {
   fill: var(--surface-3);
 }
+.halo-stop {
+  stop-color: var(--state, var(--muted));
+}
+.pitch-ring.idle .ring-halo {
+  display: none;
+}
 .ring-topmark {
   fill: var(--good);
 }
@@ -1400,9 +1442,25 @@ button.link {
 .note-label {
   fill: var(--faint);
   font: 600 15px var(--font-display);
+  transition: fill 200ms;
+}
+.note-text {
   transform-box: fill-box;
   transform-origin: center;
-  transition: transform 450ms var(--ease), fill 200ms;
+  transition: transform 450ms var(--ease);
+}
+.note-offset {
+  fill: var(--faint);
+  font: 600 8px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+.ring-note.active .note-offset {
+  fill: var(--surface);
+}
+/* Notes changing faster than the turn: jump instead of animating. */
+.pitch-ring.snap .ring-notes-rotor,
+.pitch-ring.snap .note-text {
+  transition: none;
 }
 .ring-note.active .note-dot {
   fill: var(--state, var(--brand));
@@ -1549,12 +1607,64 @@ canvas.strobe-canvas {
 }
 .tendencies {
   margin-top: 12px;
+  container-type: inline-size;
 }
 .tend-bars {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   gap: 4px;
   padding-top: 4px;
+}
+/* Narrow phones: two rows of six so labels and values keep their room. */
+@container (max-width: 420px) {
+  .tend-bars {
+    grid-template-columns: repeat(6, 1fr);
+    row-gap: 10px;
+  }
+}
+.tend-range {
+  margin: 4px 0 6px;
+}
+/* A bar beyond the ±25 cent track: a cap at the end says the value is off the scale. */
+.tend.clamped .tend-track i::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  margin-left: -5px;
+  border: 5px solid transparent;
+}
+.tend.clamped.up .tend-track i::after {
+  top: -9px;
+  border-bottom-color: currentColor;
+}
+.tend.clamped.down .tend-track i::after {
+  bottom: -9px;
+  border-top-color: currentColor;
+}
+.tend.sharp {
+  color: var(--sharp);
+}
+.tend.flat {
+  color: var(--flat);
+}
+.long-tone {
+  margin: 8px auto 0;
+  text-align: center;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.trace-wrap canvas.trace {
+  cursor: grab;
+  touch-action: pan-y;
+}
+.meta-reading {
+  display: contents;
+}
+.vs-equal {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 .tend {
   display: flex;
@@ -1598,6 +1708,7 @@ canvas.strobe-canvas {
   opacity: 0.5;
 }
 .tend span {
+  color: var(--text);
   font: 650 0.72rem var(--font-display);
   white-space: nowrap;
 }
@@ -1662,7 +1773,11 @@ canvas.strobe-canvas {
   border-radius: 4px;
   background: var(--state);
   box-shadow: 0 0 18px var(--state);
-  transition: left 90ms linear, background 200ms;
+  /* Moved with transform, not left, so a move never forces layout. */
+  transition: transform 90ms linear, background 200ms;
+}
+.tuner[data-damping='fast'] .bar-needle {
+  transition: background 200ms;
 }
 .bar-legend {
   display: flex;
@@ -3892,11 +4007,16 @@ canvas.take-chart {
   .ring-note.active .note-dot {
     fill: Highlight;
   }
-  .note-label {
+  .note-label,
+  .note-offset {
     fill: CanvasText;
   }
-  .ring-note.active .note-label {
+  .ring-note.active .note-label,
+  .ring-note.active .note-offset {
     fill: HighlightText;
+  }
+  .ring-halo {
+    display: none;
   }
   .bar-zone {
     border: 2px dashed Highlight;

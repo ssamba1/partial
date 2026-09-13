@@ -62,6 +62,46 @@ export function centsToY(cents: number, range: number, height: number, pad = 4):
   return height / 2 - (clampTo(cents, range) / range) * (height / 2 - pad);
 }
 
+export interface TracePoint {
+  t: number;
+  cents: number | null;
+  /** Note shown for this reading, or null when there was none. */
+  midi: number | null;
+}
+
+/**
+ * Splits the trace points between `end - seconds` and `end` into runs of one
+ * note, so the line breaks where the note changes or the sound stops and each
+ * run can carry its note name. The point just before the window is kept so a
+ * run enters from the left edge.
+ */
+export function traceRuns(points: readonly TracePoint[], end: number, seconds: number): { midi: number; points: { t: number; cents: number }[] }[] {
+  const runs: { midi: number; points: { t: number; cents: number }[] }[] = [];
+  let cur: { midi: number; points: { t: number; cents: number }[] } | null = null;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (p.t > end) break;
+    const next = points[i + 1];
+    if (p.t < end - seconds && !(next && next.t >= end - seconds)) continue;
+    if (p.cents === null || p.midi === null || !Number.isFinite(p.cents)) {
+      cur = null;
+      continue;
+    }
+    if (!cur || cur.midi !== p.midi) {
+      cur = { midi: p.midi, points: [] };
+      runs.push(cur);
+    }
+    cur.points.push({ t: p.t, cents: p.cents });
+  }
+  return runs;
+}
+
+/** Keeps a scrolled-back trace inside the buffer: 0 is the newest window, and it never scrolls past the oldest point. */
+export function clampTraceOffset(offset: number, newest: number, oldest: number, seconds: number): number {
+  const max = Math.max(0, newest - oldest - seconds);
+  return Math.max(0, Math.min(max, Number.isFinite(offset) ? offset : 0));
+}
+
 /** Tick positions around the ring: ten steps a side, long ticks at halves and ends. */
 export function ringTicks(range: number): { cents: number; long: boolean }[] {
   const step = range / 10;

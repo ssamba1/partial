@@ -1,5 +1,5 @@
 import { midiToFrequency } from '../core/notes';
-import { getSettings, logPractice, subscribeSettings, tuningOf } from '../store/settings';
+import { getSettings, logPractice, setDroneNotesSource, subscribeSettings, tuningOf } from '../store/settings';
 import { ensureRunning, getMaster } from './context';
 import { Drone } from './voices';
 
@@ -11,7 +11,21 @@ const active = new Map<number, Drone>();
 const listeners = new Set<() => void>();
 let soundingSince = 0;
 
+function retune() {
+  const s = getSettings();
+  const tuning = tuningOf(s);
+  active.forEach((drone, midi) => {
+    drone.setFrequency(midiToFrequency(midi, tuning));
+    drone.setVolume(s.drone.volume);
+  });
+}
+
+// The temperament tonic can follow the lowest drone (settings reads it through this).
+setDroneNotesSource(() => activeNotes());
+
 function notify() {
+  // A new lowest drone moves the tonic, so every drone is retuned to it.
+  if (getSettings().tonicFollowsDrone) retune();
   if (active.size && !soundingSince) soundingSince = performance.now();
   if (!active.size && soundingSince) {
     logPractice((performance.now() - soundingSince) / 1000, 'sound');

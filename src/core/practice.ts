@@ -5,6 +5,43 @@ export function dayKey(d: Date): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+/**
+ * Counts only the time a note is sounding, so a tuner left open on a music
+ * stand does not log an hour of practice, and says how long it has been silent.
+ */
+export class VoicedClock {
+  seconds = 0;
+  private last: number | null = null;
+  private lastVoiced: number | null = null;
+
+  constructor(private maxStep = 0.25) {}
+
+  start(time: number): void {
+    this.seconds = 0;
+    this.last = time;
+    this.lastVoiced = time;
+  }
+
+  frame(time: number, voiced: boolean): void {
+    if (this.last === null) this.start(time);
+    if (voiced) {
+      this.seconds += Math.max(0, Math.min(this.maxStep, time - this.last!));
+      this.lastVoiced = time;
+    }
+    this.last = time;
+  }
+
+  silentFor(time: number): number {
+    return this.lastVoiced === null ? 0 : Math.max(0, time - this.lastVoiced);
+  }
+
+  reset(): void {
+    this.seconds = 0;
+    this.last = null;
+    this.lastVoiced = null;
+  }
+}
+
 /** Consecutive local days with any practice, ending today (or yesterday, if today has none yet). */
 export function streak(log: Record<string, number>, today = new Date()): number {
   const d = new Date(today);

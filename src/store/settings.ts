@@ -1,6 +1,6 @@
 import type { Tendencies } from '../core/intonation';
 import type { MidiAction } from '../core/midi';
-import { setNotation, type Notation, type Temperament } from '../core/notes';
+import { clampA4, DEFAULT_MEANTONE_FLATS, sanitizeJustRatios, setNotation, TEMPERAMENTS, tonicFromDrones, TRANSPOSITIONS, type Notation, type Temperament, type TuningSystem } from '../core/notes';
 import { dayKey } from '../core/practice';
 import type { AccentLevel, ClickTrack } from '../core/rhythm';
 import type { Damping } from '../core/tracking';
@@ -26,6 +26,25 @@ export interface MetronomePreset {
 
 export type BeatVisual = 'blocks' | 'pendulum' | 'pulse';
 
+export interface TuningPreset {
+  id: string;
+  name: string;
+  a4: number;
+  temperament: Temperament;
+  tonic: number;
+  transposition: string;
+}
+
+export function sanitizeTuningPreset(v: unknown): TuningPreset | null {
+  if (!v || typeof v !== 'object') return null;
+  const p = v as Partial<TuningPreset>;
+  const temperament = TEMPERAMENTS.find((t) => t.id === p.temperament)?.id;
+  if (typeof p.id !== 'string' || typeof p.name !== 'string' || !temperament || !TRANSPOSITIONS.some((t) => t.id === p.transposition)) return null;
+  const tonic = Number(p.tonic);
+  if (!Number.isInteger(tonic) || tonic < 0 || tonic > 11) return null;
+  return { id: p.id, name: p.name.slice(0, 40) || 'Tuning', a4: clampA4(p.a4), temperament, tonic, transposition: p.transposition! };
+}
+
 export interface Settings {
   theme: 'system' | 'light' | 'dark';
   a4: number;
@@ -46,9 +65,27 @@ export interface Settings {
   notation: Notation;
   /** Sound the reference drone for the note you are holding. */
   followDrone: boolean;
-  /** All-time intonation statistics per written pitch class. */
+  /** Old all-time statistics per written pitch class; moved to store/tendencies on first load and then left empty. */
   tendencies: Tendencies;
-  tunerMode: 'chromatic' | 'strings';
+  tunerMode: 'chromatic' | 'strings' | 'partials';
+  /** Concert MIDI note of the fundamental in partials mode. */
+  partialFundamental: number;
+  /** What stays at the reference in non-equal temperaments. */
+  temperamentAnchor: 'a4' | 'tonic';
+  /** Just intonation ratio choices by degree, such as { 10: '7/4' }. */
+  justRatios: Record<number, string>;
+  /** Flats in the quarter-comma meantone chain: where the wolf fifth falls. */
+  meantoneFlats: number;
+  /** Take the temperament tonic from the lowest sounding drone. */
+  tonicFollowsDrone: boolean;
+  /** Saved combinations of reference pitch, temperament, key and instrument key. */
+  tuningPresets: TuningPreset[];
+  /** Keep C at the top of the tuner ring. */
+  ringFixed: boolean;
+  /** Start listening when the tuner opens, if the mic is already allowed. */
+  tunerAutoStart: boolean;
+  /** Stop listening after this many minutes with no note; 0 never stops. */
+  tunerAutoStopMinutes: number;
   stringInstrument: string;
   pureFifths: boolean;
   /** Ignore the metronome click in the tuner. */
@@ -138,6 +175,15 @@ export const DEFAULT_SETTINGS: Settings = {
   followDrone: false,
   tendencies: {},
   tunerMode: 'chromatic',
+  partialFundamental: 46,
+  temperamentAnchor: 'a4',
+  justRatios: {},
+  meantoneFlats: DEFAULT_MEANTONE_FLATS,
+  tonicFollowsDrone: false,
+  tuningPresets: [],
+  ringFixed: false,
+  tunerAutoStart: false,
+  tunerAutoStopMinutes: 5,
   stringInstrument: 'guitar',
   pureFifths: true,
   ignoreClick: true,
@@ -202,7 +248,22 @@ export function mergeSettings(stored: Partial<Settings>): Settings {
     tunerHoldSeconds: clampHoldSeconds(stored.tunerHoldSeconds, DEFAULT_SETTINGS.tunerHoldSeconds),
     tunerScale: (['50', '20', '10', 'auto'] as const).includes(stored.tunerScale as TunerScale) ? (stored.tunerScale as TunerScale) : DEFAULT_SETTINGS.tunerScale,
     customTunings: Array.isArray(stored.customTunings) ? stored.customTunings.map(sanitizeTuning).filter((x): x is CustomTuning => x !== null) : [],
+    a4: clampA4(stored.a4, DEFAULT_SETTINGS.a4),
+    tunerMode: (['chromatic', 'strings', 'partials'] as const).includes(stored.tunerMode as Settings['tunerMode']) ? (stored.tunerMode as Settings['tunerMode']) : DEFAULT_SETTINGS.tunerMode,
+    partialFundamental: Number.isInteger(stored.partialFundamental) && stored.partialFundamental! >= 24 && stored.partialFundamental! <= 72 ? stored.partialFundamental! : DEFAULT_SETTINGS.partialFundamental,
+    temperamentAnchor: stored.temperamentAnchor === 'tonic' ? 'tonic' : 'a4',
+    justRatios: sanitizeJustRatios(stored.justRatios),
+    meantoneFlats: Number.isInteger(stored.meantoneFlats) && stored.meantoneFlats! >= 0 && stored.meantoneFlats! <= 11 ? stored.meantoneFlats! : DEFAULT_MEANTONE_FLATS,
+    tuningPresets: Array.isArray(stored.tuningPresets) ? stored.tuningPresets.map(sanitizeTuningPreset).filter((x): x is TuningPreset => x !== null) : [],
+    tunerAutoStopMinutes: clampAutoStop(stored.tunerAutoStopMinutes),
   };
+}
+
+/** Minutes of silence before the tuner stops: 0 (never) to 60. */
+export function clampAutoStop(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.tunerAutoStopMinutes;
+  return Math.max(0, Math.min(60, Math.round(n)));
 }
 
 function load(): Settings {
@@ -241,8 +302,22 @@ export function subscribeSettings(fn: (s: Settings) => void): () => void {
   return () => listeners.delete(fn);
 }
 
-export function tuningOf(s: Settings) {
-  return { a4: s.a4, temperament: s.temperament, tonic: s.tonic };
+let droneNotes: () => readonly number[] = () => [];
+
+/** The drone bank registers here, so the tonic can follow the lowest drone without settings importing audio code. */
+export function setDroneNotesSource(fn: () => readonly number[]): void {
+  droneNotes = fn;
+}
+
+export function tuningOf(s: Settings): TuningSystem {
+  return {
+    a4: s.a4,
+    temperament: s.temperament,
+    tonic: s.tonicFollowsDrone && s.temperament !== 'equal' ? tonicFromDrones(s.tonic, droneNotes()) : s.tonic,
+    anchor: s.temperamentAnchor,
+    justRatios: s.justRatios,
+    meantoneFlats: s.meantoneFlats,
+  };
 }
 
 /** Adds practice seconds to today's total and to the activity's total. */

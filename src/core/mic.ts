@@ -1,5 +1,37 @@
 export type MicChannel = 'mix' | 'left' | 'right';
 
+export type MicFailureReason = 'denied' | 'unavailable' | 'insecure' | 'busy' | 'notfound' | 'constraints';
+
+/** Plain message for a getUserMedia error name (DOMException.name). */
+export function micFailure(name: string | undefined): { reason: MicFailureReason; message: string } {
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+    case 'PermissionDeniedError':
+      return { reason: 'denied', message: 'Microphone access is blocked for this site.' };
+    case 'NotReadableError':
+    case 'TrackStartError':
+    case 'AbortError':
+      return { reason: 'busy', message: 'The microphone could not start. Another app may be using it. Close that app and try again.' };
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return { reason: 'notfound', message: 'No microphone was found. Plug one in or check your system sound settings.' };
+    case 'OverconstrainedError':
+      return { reason: 'constraints', message: 'The chosen input cannot be opened with these settings. Pick Default under Input in tuner options.' };
+    default:
+      return { reason: 'unavailable', message: 'No microphone could be opened.' };
+  }
+}
+
+/** Steps to allow a blocked microphone. Only desktop Chrome's are specific; other browsers get general steps. */
+export function micHelpSteps(userAgent: string): string[] {
+  const mobile = /Android|iPhone|iPad|Mobile/i.test(userAgent);
+  const chrome = /Chrome\//.test(userAgent) && !/Edg\/|OPR\//.test(userAgent);
+  // Chrome desktop steps from https://support.google.com/chrome/answer/2693767
+  if (chrome && !mobile) return ['Open Chrome menu, then Settings.', 'Go to Privacy and security, then Site settings, then Microphone.', 'Allow this site, then reload the page.'];
+  return ["Open this site's settings in your browser (often from the address bar).", 'Allow the microphone for this site.', 'Reload the page.'];
+}
+
 /**
  * Which input channel to analyse: null means use the browser's mono mix. A
  * one-channel input always uses the mix, since its "right" side is silent.

@@ -821,181 +821,211 @@
   "id": "01-51",
   "file": "gaps/01-tuner.md",
   "title": "No steadiness feedback per long tone",
-  "status": "open"
+  "status": "fixed",
+  "note": "LongToneWatcher reports length, spread and drift when a held note of 2 s or more ends; shown under the readout."
  },
  {
   "id": "01-52",
   "file": "gaps/01-tuner.md",
   "title": "Trace cannot show which note was played",
-  "status": "open"
+  "status": "fixed",
+  "note": "Trace breaks and labels each note, tap pauses, drag scrolls back through 60 s. traceRuns and clampTraceOffset tested."
  },
  {
   "id": "01-53",
   "file": "gaps/01-tuner.md",
   "title": "Tendencies mix incompatible data",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tendencies kept per tuning key (A4, temperament, tonic) in their own store."
  },
  {
   "id": "01-54",
   "file": "gaps/01-tuner.md",
   "title": "Tendencies include slides and attacks, weighted by frame rate",
-  "status": "open"
+  "status": "fixed",
+  "note": "Stored by concert pitch class and transposed only for display."
  },
  {
   "id": "01-55",
   "file": "gaps/01-tuner.md",
   "title": "Tendencies never age",
-  "status": "open"
+  "status": "fixed",
+  "note": "Per-day buckets (60 days) plus all time; Last 7 days / All time / Older switch."
  },
  {
   "id": "01-56",
   "file": "gaps/01-tuner.md",
   "title": "Tendencies grid overflows on narrow phones and hides large values",
-  "status": "open"
+  "status": "fixed",
+  "note": "Container query switches to 6 columns when narrow; clamped bars get arrow caps."
  },
  {
   "id": "01-57",
   "file": "gaps/01-tuner.md",
   "title": "Saving tendencies re-renders the whole tuner every 5 seconds",
-  "status": "open"
+  "status": "fixed",
+  "note": "Readings weighted by seconds and only counted after 300 ms steady (StableNoteGate)."
  },
  {
   "id": "01-58",
   "file": "gaps/01-tuner.md",
   "title": "New DOM nodes every frame",
-  "status": "open"
+  "status": "fixed",
+  "note": "Readout nodes built once; setText only writes changed text."
  },
  {
   "id": "01-59",
   "file": "gaps/01-tuner.md",
   "title": "Expensive canvas drawing every frame",
-  "status": "open"
+  "status": "fixed",
+  "note": "Theme colours cached, one path per colour, trace drawn at most 30 fps."
  },
  {
   "id": "01-60",
   "file": "gaps/01-tuner.md",
   "title": "Hidden ring still updates, and every write happens even when nothing changed",
-  "status": "open"
+  "status": "fixed",
+  "note": "Ring only updated when shown; ring writes cached so unchanged frames write nothing."
  },
  {
   "id": "01-61",
   "file": "gaps/01-tuner.md",
   "title": "Glow filter repaints on every frame",
-  "status": "open"
+  "status": "partial: paint time not measured on a phone",
+  "note": "Blur filter replaced by a radial gradient halo that moves with the tip."
  },
  {
   "id": "01-62",
   "file": "gaps/01-tuner.md",
   "title": "Bar needle animates `left`",
-  "status": "open"
+  "status": "fixed",
+  "note": "Bar needle moves by transform in px; no transition with Responsive steadiness."
  },
  {
   "id": "01-63",
   "file": "gaps/01-tuner.md",
   "title": "Ring rotation lags in fast passages",
-  "status": "open"
+  "status": "fixed",
+  "note": "Ring snaps without animation on fast note changes; Keep C at the top option."
  },
  {
   "id": "01-64",
   "file": "gaps/01-tuner.md",
   "title": "Stopping leaves a stale reading",
-  "status": "open"
+  "status": "fixed",
+  "note": "Stopping clears note, cents, ring and needle. e2e checks the display clears."
  },
  {
   "id": "01-65",
   "file": "gaps/01-tuner.md",
   "title": "A second tap during the permission prompt starts instead of cancelling",
-  "status": "open"
+  "status": "fixed",
+  "note": "Starting state with aria-busy; a second tap cancels a pending start."
  },
  {
   "id": "01-66",
   "file": "gaps/01-tuner.md",
   "title": "Microphone errors give no recovery steps",
-  "status": "open"
+  "status": "partial: only desktop Chrome steps are sourced (support.google.com/chrome/answer/2693767); other browsers get general steps",
+  "note": "micFailure maps error names to plain messages; denied shows How to allow the microphone."
  },
  {
   "id": "01-67",
   "file": "gaps/01-tuner.md",
   "title": "No auto-start even when permission is already granted",
-  "status": "open"
+  "status": "fixed",
+  "note": "Start when opened option, and resumes when returning to a tuner that was listening, if mic already allowed."
  },
  {
   "id": "01-68",
   "file": "gaps/01-tuner.md",
   "title": "No stop after silence, and practice time counts silence",
-  "status": "open"
+  "status": "fixed",
+  "note": "Practice time counts voiced seconds only; stops after N silent minutes (default 5, 0 never)."
  },
  {
   "id": "01-69",
   "file": "gaps/01-tuner.md",
   "title": "Keyboard shortcuts are thin and Space gets swallowed",
-  "status": "open"
+  "status": "fixed",
+  "note": "Space, Enter, R/B/S, [ ], arrow keys; listed in the shortcuts sheet."
  },
  {
   "id": "01-70",
   "file": "gaps/01-tuner.md",
   "title": "A4 range and presets exclude historical and regional pitches",
-  "status": "open"
+  "status": "partial: no chips for 432 or Highland pipe pitch (no authoritative source found); they can still be typed",
+  "note": "Range 350 to 500; Baroque 392/415/466, Classical 430/435, Modern chips cited to gamutmusic.com."
  },
  {
   "id": "01-71",
   "file": "gaps/01-tuner.md",
   "title": "A4 cannot be typed and steps are coarse",
-  "status": "open"
+  "status": "fixed",
+  "note": "A4 is a number input with 0.1 steps and shows cents from 440."
  },
  {
   "id": "01-72",
   "file": "gaps/01-tuner.md",
   "title": "Non-equal temperaments move A away from the chosen reference",
-  "status": "open"
+  "status": "fixed",
+  "note": "Default anchor keeps A4 at the reference; option to anchor the key note. Tested for every temperament and tonic."
  },
  {
   "id": "01-73",
   "file": "gaps/01-tuner.md",
   "title": "Well temperaments labelled with a misleading \"Key\"",
-  "status": "open"
+  "status": "fixed",
+  "note": "Well temperaments label the picker Starts on and reset it to C."
  },
  {
   "id": "01-74",
   "file": "gaps/01-tuner.md",
   "title": "Tonic picker does not say whether it is concert or written",
-  "status": "open"
+  "status": "fixed",
+  "note": "Key picker shown in written pitch for transposing instruments, stored as concert, with the concert note shown."
  },
  {
   "id": "01-75",
   "file": "gaps/01-tuner.md",
   "title": "Just intonation ratios are fixed",
-  "status": "open"
+  "status": "fixed",
+  "note": "Per-degree just ratio choices (Huygens-Fokker list) and a Harmonic 7th preset; tested against ratioToCents."
  },
  {
   "id": "01-76",
   "file": "gaps/01-tuner.md",
   "title": "Meantone wolf position and enharmonics are fixed",
-  "status": "open"
+  "status": "fixed",
+  "note": "Notes in tune option moves the meantone chain; A flat pure with the A flat to C sharp chain (tested)."
  },
  {
   "id": "01-77",
   "file": "gaps/01-tuner.md",
   "title": "Temperament targets are invisible",
-  "status": "open"
+  "status": "fixed",
+  "note": "Ring shows each note offset from equal; readout shows vs equal cents."
  },
  {
   "id": "01-78",
   "file": "gaps/01-tuner.md",
   "title": "No quick tuning presets",
-  "status": "open"
+  "status": "fixed",
+  "note": "Saved tuning presets (A4, temperament, key, instrument key) as chips with delete."
  },
  {
   "id": "01-79",
   "file": "gaps/01-tuner.md",
   "title": "Tonic does not follow the drone",
-  "status": "open"
+  "status": "fixed",
+  "note": "Key follows the drone option uses the lowest drone and retunes drones. Note: combining it with Drone follows you moves the key with the follow drone."
  },
  {
   "id": "01-80",
   "file": "gaps/01-tuner.md",
   "title": "No harmonic-partial mode for brass",
-  "status": "open"
+  "status": "fixed",
+  "note": "Partials mode: pick a fundamental, shows partial number and its cents vs equal. Unit and e2e tested."
  },
  {
   "id": "01-81",

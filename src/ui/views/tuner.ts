@@ -1,8 +1,10 @@
-import { currentMicTrack, ensureRunning, getMaster, MicError } from '../../audio/context';
+import { currentMicTrack, ensureRunning, getContext, getMaster, MicError } from '../../audio/context';
+import { VoicedClock } from '../../core/practice';
+import { nearestPartial, type PartialReading } from '../../core/partials';
 import { MIN_FREQUENCY } from '../../audio/pitchTracker';
 import { Drone, DRONE_TIMBRES, playTone, type DroneTimbre } from '../../audio/voices';
 import { playChime, playCue } from '../../audio/cues';
-import { agoText, AutoScale, barLabels, centsText, centsToPercent, centsToY, clampHoldSeconds, clampTolerance, formatHz, scaleRange, signedCents, signedLabel, useDecimalCents, type DecimalCents, type TunerScale } from '../../core/display';
+import { agoText, AutoScale, barLabels, centsText, centsToPercent, centsToY, clampHoldSeconds, clampTolerance, clampTraceOffset, formatHz, scaleRange, signedCents, signedLabel, traceRuns, useDecimalCents, type DecimalCents, type TracePoint, type TunerScale } from '../../core/display';
 import { PhaseStrobe, STROBE_PARTIALS, type StrobeRow } from '../../core/strobe';
 import { icon } from '../icons';
 import { formatCents, uid } from '../../core/format';
@@ -10,17 +12,24 @@ import { allInstruments, CUSTOM_TUNING_PREFIX, sanitizeTuning, StringFollower, s
 import { activeFrequencies, noteOff, noteOn } from '../../audio/droneBank';
 import { FollowState, matchesReference, referenceOctaves, sonifyInterval, type ReferenceOctave } from '../../core/selfsound';
 import { OnsetGate } from '../../core/tracking';
-import { addReading, InTuneLatch, summarize, traceSummary, type Tendencies } from '../../core/intonation';
-import { calibratedThreshold, meterPosition, micWarnings, SignalStatus, zeroCrossingRate } from '../../core/mic';
-import { midiToFrequency, noteName, prettyName, TRANSPOSITIONS, transpose } from '../../core/notes';
-import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
+import { addReading, bookTendencies, InTuneLatch, LongToneWatcher, mergeTendencies, StableNoteGate, summarize, tendencyKey, traceSummary, type HeldNote, type Tendencies } from '../../core/intonation';
+import { clearTendencies, getTendencyBook, saveTendencies } from '../../store/tendencies';
+import { calibratedThreshold, meterPosition, micHelpSteps, micWarnings, SignalStatus, zeroCrossingRate } from '../../core/mic';
+import { clampA4, midiToFrequency, noteName, pitchClassOffsets, prettyName, TRANSPOSITIONS, transpose, vsEqualCents } from '../../core/notes';
+import { clampAutoStop, getSettings, logPractice, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
 import { haptic, iconButton, openSheet, segmented } from '../components';
-import { cssVar, errorBox, fitCanvas, h, numberInput, select } from '../dom';
+import { cssVar, errorBox, fitCanvas, h, numberInput, select, setText } from '../dom';
 import { announce } from '../controls';
 import { createPitchRing } from '../pitchRing';
-import { ActivityTimer, createTracker, recordTuningFrame, selfSounds } from '../shared';
+import { createTracker, recordTuningFrame, selfSounds } from '../shared';
 
+/** Whether the tuner was listening when the view was last left, so coming back resumes it. */
+let tunerWasRunning = false;
+
+/** Seconds the trace shows at once. */
 const HISTORY_SECONDS = 10;
+/** Seconds kept for scrolling back through a paused trace. */
+const TRACE_BUFFER_SECONDS = 60;
 
 const RANGES: { value: string; label: string; cents: number }[] = [
   { value: '10', label: 'Wide ±10', cents: 10 },
@@ -32,6 +41,7 @@ const RANGES: { value: string; label: string; cents: number }[] = [
 interface OptionsTools {
   /** Measures room noise for two seconds and returns the new threshold, or null if the mic could not start. */
   calibrate: () => Promise<number | null>;
+  resetTendencies: () => void;
 }
 
 const SENSITIVITY_PRESETS = ['0.002', '0.008', '0.02'];
@@ -171,6 +181,29 @@ function openTunerOptions(tools: OptionsTools) {
       h('input', { type: 'checkbox', role: 'switch', checked: s.keepLastNote, onchange: (e: Event) => updateSettings({ keepLastNote: (e.target as HTMLInputElement).checked }) }),
     ),
     h(
+      'label',
+      { class: 'switch-row' },
+      h('span', null, h('strong', null, 'Keep C at the top'), h('small', null, 'The ring stays still and the dot moves to the note, instead of turning the note to the top.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: s.ringFixed, onchange: (e: Event) => updateSettings({ ringFixed: (e.target as HTMLInputElement).checked }) }),
+    ),
+    h(
+      'label',
+      { class: 'switch-row' },
+      h('span', null, h('strong', null, 'Start when opened'), h('small', null, 'Listens as soon as the tuner opens, once the microphone is allowed.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: s.tunerAutoStart, onchange: (e: Event) => updateSettings({ tunerAutoStart: (e.target as HTMLInputElement).checked }) }),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h(
+        'label',
+        { class: 'row tight' },
+        h('span', { class: 'field-label' }, 'Stop after silence, minutes'),
+        numberInput(s.tunerAutoStopMinutes, (n) => updateSettings({ tunerAutoStopMinutes: clampAutoStop(n) }), { min: 0, max: 60, step: 1, class: 'compact' }),
+      ),
+      h('small', null, 'Frees the microphone when nothing is played for this long. 0 never stops.'),
+    ),
+    h(
       'div',
       { class: 'field' },
       h('span', { class: 'field-label' }, 'Steadiness'),
@@ -286,7 +319,7 @@ function openTunerOptions(tools: OptionsTools) {
       {
         class: 'pill-btn',
         onclick: () => {
-          if (confirm('Clear your saved intonation tendencies?')) updateSettings({ tendencies: {} });
+          if (confirm('Clear your saved intonation tendencies?')) tools.resetTendencies();
         },
       },
       'Reset tendencies',
@@ -312,8 +345,32 @@ export function mountTuner(root: HTMLElement) {
       return lowest;
     },
   });
-  const timer = new ActivityTimer('tuner');
-  const history: { t: number; cents: number | null }[] = [];
+  const voiced = new VoicedClock();
+  const history: TracePoint[] = [];
+  /** Paused trace: the time its window ends at, and how far it is scrolled back. */
+  let traceFrozenAt: number | null = null;
+  let traceOffset = 0;
+  const stableGate = new StableNoteGate();
+  const longTones = new LongToneWatcher();
+  let longToneTimer = 0;
+  // Created up front so frame handlers can use it instead of querying the DOM every frame.
+  const view = h('section', { class: 'view tuner' });
+  /** Theme colours for the canvases, read once and refreshed when settings or the colour scheme change. */
+  let colors: Record<'good' | 'goodSoft' | 'sharp' | 'flat' | 'surface3' | 'muted', string> | null = null;
+  const palette = () =>
+    (colors ??= { good: cssVar('--good'), goodSoft: cssVar('--good-soft'), sharp: cssVar('--sharp'), flat: cssVar('--flat'), surface3: cssVar('--surface-3'), muted: cssVar('--muted') });
+  const nameCache = new Map<string, { pretty: string; letter: string; accidental: string }>();
+  const noteParts = (midi: number, flats: boolean) => {
+    const key = noteName(midi, flats, false);
+    let v = nameCache.get(key);
+    if (!v) {
+      const pretty = prettyName(noteName(midi, flats, false));
+      const accidental = pretty.match(/[♯♭]/)?.[0] ?? '';
+      v = { pretty, letter: pretty.replace(accidental, ''), accidental };
+      nameCache.set(key, v);
+    }
+    return v;
+  };
   const inTuneLatch = new InTuneLatch(getSettings().tunerHoldSeconds);
   const autoScale = new AutoScale();
   /** Cents either side of in tune that the ring, bar and trace span right now. */
@@ -324,7 +381,6 @@ export function mountTuner(root: HTMLElement) {
   let strobeFrameTime: number | null = null;
   const reducedMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   const signal = new SignalStatus();
-  let lastTendencyAt = 0;
   /** The one reference tone sounding: a string reference (index) or the hear-target tone (index null). */
   let refSound: { index: number | null; frequency: number; stop: () => void } | null = null;
   let manualString: number | null = null;
@@ -392,7 +448,8 @@ export function mountTuner(root: HTMLElement) {
     const n = STROBE_PARTIALS.length;
     const rowH = hh / n;
     const tol = getSettings().tolerance;
-    const color = cents === null ? cssVar('--surface-3') : Math.abs(cents) <= tol ? cssVar('--good') : cents > 0 ? cssVar('--sharp') : cssVar('--flat');
+    const c = palette();
+    const color = cents === null ? c.surface3 : Math.abs(cents) <= tol ? c.good : cents > 0 ? c.sharp : c.flat;
     for (let r = 0; r < n; r++) {
       const bandW = w / (8 * STROBE_PARTIALS[r]);
       const phase = reduced ? (cents === null ? 0 : (Math.max(-range, Math.min(range, cents)) / range) * 0.5) : strobePhases[r].phase;
@@ -407,7 +464,19 @@ export function mountTuner(root: HTMLElement) {
     ctx.globalAlpha = 1;
   }
 
-  const freqEl = h('div', { class: 'tuner-meta' }, h('span', null, 'Play a note to begin'));
+  // The readout spans are made once and only their text changes per frame.
+  const freqMsg = h('span', null, 'Play a note to begin');
+  const freqHz = h('b');
+  const targetHz = h('b');
+  const vsEqualEl = h('span', { class: 'vs-equal', hidden: true });
+  const freqReading = h('span', { class: 'meta-reading', hidden: true }, h('span', null, freqHz, ' Hz'), h('span', { class: 'sep' }), h('span', null, 'target ', targetHz, ' Hz'), vsEqualEl);
+  const freqEl = h('div', { class: 'tuner-meta' }, freqMsg, freqReading);
+  const showFreqMessage = (text: string) => {
+    freqReading.hidden = true;
+    freqMsg.hidden = false;
+    setText(freqMsg, text);
+  };
+  const longToneEl = h('p', { class: 'long-tone', role: 'status', hidden: true });
   let lastTarget: number | null = null;
   const refBtn = h(
     'button',
@@ -456,62 +525,87 @@ export function mountTuner(root: HTMLElement) {
   let selectedTend: number | null = null;
 
   /* ----- Intonation tendencies ----- */
+  // Seconds of steady sound for the current tuning, not yet saved; saved every 5 s to their own store.
   let pendingTend: Tendencies = {};
-  let pendingCount = 0;
+  let pendingKey = tendencyKey(tuningOf(getSettings()));
+  let tendRange: 'week' | 'all' | 'legacy' = 'week';
   const tendBars = h('div', { class: 'tend-bars' });
   const tendCaption = h('span', { class: 'muted small' });
+  const tendRangeSeg = segmented(
+    [
+      { value: 'week', label: 'Last 7 days' },
+      { value: 'all', label: 'All time' },
+      { value: 'legacy', label: 'Older' },
+    ],
+    tendRange,
+    (v) => {
+      tendRange = v;
+      selectedTend = null;
+      renderTendencies();
+    },
+    'Tendencies period',
+  );
+  tendRangeSeg.classList.add('tend-range');
   const tendPanel = h(
     'div',
     { class: 'trace-wrap tendencies' },
     h('div', { class: 'trace-label' }, h('span', null, 'Your tendencies'), tendCaption),
+    tendRangeSeg,
     tendBars,
     tendTable,
   );
   function flushTendencies() {
-    if (!pendingCount) return;
-    const add = pendingTend;
+    if (!Object.keys(pendingTend).length) return;
+    saveTendencies(pendingKey, pendingTend);
     pendingTend = {};
-    pendingCount = 0;
-    updateSettings((s) => {
-      const merged: Tendencies = { ...s.tendencies };
-      for (const [pc, st] of Object.entries(add)) {
-        const cur = merged[Number(pc)] ?? { count: 0, sum: 0, sumSq: 0 };
-        merged[Number(pc)] = { count: cur.count + st.count, sum: cur.sum + st.sum, sumSq: cur.sumSq + st.sumSq };
-      }
-      return { tendencies: merged };
-    });
+    renderTendencies();
   }
   const flushTimer = window.setInterval(flushTendencies, 5000);
   function renderTendencies() {
     const s = getSettings();
-    const combined: Tendencies = { ...s.tendencies };
-    for (const [pc, st] of Object.entries(pendingTend)) {
-      const cur = combined[Number(pc)] ?? { count: 0, sum: 0, sumSq: 0 };
-      combined[Number(pc)] = { count: cur.count + st.count, sum: cur.sum + st.sum, sumSq: cur.sumSq + st.sumSq };
+    const book = getTendencyBook();
+    const key = tendencyKey(tuningOf(s));
+    const hasLegacy = Object.keys(book.legacy).length > 0;
+    (tendRangeSeg.querySelector('[data-value="legacy"]') as HTMLElement).hidden = !hasLegacy;
+    if (tendRange === 'legacy' && !hasLegacy) {
+      tendRange = 'week';
+      tendRangeSeg.set('week');
     }
-    const stats = summarize(combined, 20);
-    const byPc = new Map(stats.map((x) => [x.pitchClass, x]));
+    const legacy = tendRange === 'legacy';
+    let combined: Tendencies;
+    if (legacy) combined = book.legacy;
+    else {
+      combined = bookTendencies(book, key, tendRange === 'all' ? 'all' : 7, new Date());
+      if (pendingKey === key) combined = mergeTendencies(combined, pendingTend);
+    }
+    // Live stats are seconds of steady sound by concert pitch class; older readings were frames by written pitch class.
+    const stats = summarize(combined, legacy ? 20 : 2);
+    const semis = legacy ? 0 : (TRANSPOSITIONS.find((t) => t.id === s.transposition)?.semitones ?? 0);
+    const byPc = new Map(stats.map((x) => [((x.pitchClass + semis) % 12 + 12) % 12, x]));
+    const amount = (n: number) => (legacy ? `${Math.round(n)} readings` : `${Math.round(n)} s`);
+    const period = legacy ? 'older readings, mixed tunings' : tendRange === 'all' ? 'all time, this tuning' : 'last 7 days, this tuning';
     const detail = (pc: number) => {
       const st = byPc.get(pc);
       const name = prettyName(noteName(pc, s.flats, false));
-      return st ? `${name}: ${formatCents(st.mean)} average, ±${st.spread.toFixed(1)}¢ spread, ${st.count} readings` : `${name}: not enough readings yet`;
+      return st ? `${name}: ${formatCents(st.mean)} average, ±${st.spread.toFixed(1)}¢ spread, ${amount(st.count)}` : `${name}: not enough readings yet`;
     };
-    tendCaption.textContent = selectedTend !== null ? detail(selectedTend) : stats.length ? 'average cents per note, all sessions. Tap a note for details' : 'Play for a while to see which notes you tend to play sharp or flat';
+    tendCaption.textContent = selectedTend !== null ? detail(selectedTend) : stats.length ? `average cents per note, ${period}. Tap a note for details` : 'Play for a while to see which notes you tend to play sharp or flat';
     // The same numbers as a table for screen readers.
     tendTable.replaceChildren(
-      h('caption', null, 'Your tendencies, all sessions'),
-      h('tr', null, h('th', null, 'Note'), h('th', null, 'Average'), h('th', null, 'Spread'), h('th', null, 'Readings')),
-      ...stats.map((st) => h('tr', null, h('td', null, prettyName(noteName(st.pitchClass, s.flats, false))), h('td', null, formatCents(st.mean)), h('td', null, `±${st.spread.toFixed(1)}¢`), h('td', null, String(st.count)))),
+      h('caption', null, `Your tendencies, ${period}`),
+      h('tr', null, h('th', null, 'Note'), h('th', null, 'Average'), h('th', null, 'Spread'), h('th', null, legacy ? 'Readings' : 'Seconds')),
+      ...[...byPc.entries()].sort((a, b) => a[0] - b[0]).map(([pc, st]) => h('tr', null, h('td', null, prettyName(noteName(pc, s.flats, false))), h('td', null, formatCents(st.mean)), h('td', null, `±${st.spread.toFixed(1)}¢`), h('td', null, String(Math.round(st.count))))),
     );
     tendBars.replaceChildren(
       ...Array.from({ length: 12 }, (_, pc) => {
         const st = byPc.get(pc);
         const mean = st ? Math.max(-25, Math.min(25, st.mean)) : 0;
         const cls = !st ? 'none' : Math.abs(st.mean) <= s.tolerance ? 'good' : st.mean > 0 ? 'sharp' : 'flat';
+        const clamped = st && Math.abs(st.mean) > 25 ? ` clamped ${st.mean > 0 ? 'up' : 'down'}` : '';
         return h(
           'button',
           {
-            class: `tend ${cls}${selectedTend === pc ? ' on' : ''}`,
+            class: `tend ${cls}${clamped}${selectedTend === pc ? ' on' : ''}`,
             title: detail(pc),
             'aria-hidden': 'true',
             tabindex: -1,
@@ -757,38 +851,111 @@ export function mountTuner(root: HTMLElement) {
   }
 
   /* ----- Start / stop ----- */
+  /** Bumped by every start and cancel, so a start that finishes late does not touch the display. */
+  let startToken = 0;
+  let starting = false;
+
+  function idleControls(hintText: string) {
+    view.classList.remove('listening');
+    startBtn.textContent = 'Start';
+    startBtn.removeAttribute('aria-busy');
+    startBtn.setAttribute('aria-pressed', 'false');
+    hint.textContent = hintText;
+  }
+
+  /** Clears the last live reading so a stopped tuner does not look like it is still hearing a note. */
+  function resetDisplay() {
+    const s = getSettings();
+    shownAt = null;
+    clearStale();
+    inTuneLatch.reset();
+    ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats, range);
+    view.classList.remove('has-note', 'in-tune', 'sharp', 'flat');
+    placeNeedle(0);
+    barMeter.classList.remove('good');
+    setText(barNote, 'Play a note');
+    setText(strobeNote, 'Play a note');
+    setText(barCents, '');
+    setText(strobeCents, '');
+    setText(centsEl, '');
+    vsEqualEl.hidden = true;
+    if (s.tunerDisplay === 'strobe') drawStrobe(null, null);
+  }
+
+  function stopListening(message: string) {
+    tracker.stop();
+    logPractice(voiced.seconds, 'tuner');
+    voiced.reset();
+    stopFollow();
+    signal.reset();
+    onsets.reset();
+    stableGate.reset();
+    showLongTone(longTones.flush());
+    flushTendencies();
+    noticeSlot.replaceChildren();
+    idleControls('Tap to start');
+    showFreqMessage(message);
+    resetDisplay();
+  }
+
+  function showMicError(err: unknown) {
+    const message = err instanceof Error ? err.message : 'No microphone could be opened.';
+    const box = errorBox(message, () => void toggle());
+    if (err instanceof MicError && err.reason === 'denied') {
+      const steps = h('ol', { class: 'mic-help', hidden: true }, ...micHelpSteps(navigator.userAgent).map((t) => h('li', null, t)));
+      const helpBtn = h('button', { 'aria-expanded': 'false', onclick: () => { steps.hidden = !steps.hidden; helpBtn.setAttribute('aria-expanded', String(!steps.hidden)); } }, 'How to allow the microphone');
+      box.append(helpBtn, steps);
+    }
+    errorSlot.replaceChildren(box);
+    showFreqMessage('Microphone not available');
+  }
+
   async function toggle() {
     errorSlot.replaceChildren();
-    if (tracker.running) {
+    if (starting) {
+      // A second tap while the permission prompt is up cancels the start.
+      startToken++;
+      starting = false;
       tracker.stop();
-      timer.stop();
-      stopFollow();
-      signal.reset();
-      onsets.reset();
-      noticeSlot.replaceChildren();
-      root.querySelector('.tuner')?.classList.remove('listening');
-      startBtn.textContent = 'Start';
-      startBtn.setAttribute('aria-pressed', 'false');
-      hint.textContent = 'Tap to start';
-      freqEl.replaceChildren(h('span', null, 'Paused'));
+      idleControls('Tap to start');
       return;
     }
+    if (tracker.running) {
+      tunerWasRunning = false;
+      stopListening('Paused');
+      return;
+    }
+    const token = ++startToken;
+    starting = true;
+    startBtn.textContent = 'Starting';
+    startBtn.setAttribute('aria-busy', 'true');
+    hint.textContent = 'Waiting for microphone';
     try {
       await tracker.start();
-      if (!tracker.running) return;
+      if (token !== startToken) return;
+      starting = false;
+      if (!tracker.running) {
+        idleControls('Tap to start');
+        return;
+      }
+      tunerWasRunning = true;
       shownAt = null;
       clearStale();
       phaseStrobe.reset();
       strobeFrameTime = null;
-      timer.start();
-      root.querySelector('.tuner')?.classList.add('listening');
+      voiced.start(performance.now() / 1000);
+      view.classList.add('listening');
       startBtn.textContent = 'Stop';
+      startBtn.removeAttribute('aria-busy');
       startBtn.setAttribute('aria-pressed', 'true');
       hint.textContent = 'Listening';
+      showFreqMessage('Play a note');
       noticeSlot.replaceChildren(...micWarningList().map((w) => h('p', { class: 'mic-warning', role: 'note' }, w)));
     } catch (err) {
-      const msg = err instanceof MicError ? err.message : 'Could not start the microphone.';
-      errorSlot.replaceChildren(errorBox(msg, () => void toggle()));
+      if (token !== startToken) return;
+      starting = false;
+      idleControls('Tap to start');
+      showMicError(err);
     }
   }
 
@@ -824,8 +991,7 @@ export function mountTuner(root: HTMLElement) {
     if (document.visibilityState === 'hidden') {
       if (!tracker.running) return;
       pausedHidden = true;
-      await toggle();
-      freqEl.replaceChildren(h('span', null, 'Paused while in background. Tap to resume.'));
+      stopListening('Paused while in background. Tap to resume.');
       return;
     }
     if (!pausedHidden || disposed) return;
@@ -886,9 +1052,19 @@ export function mountTuner(root: HTMLElement) {
     let displayMidi: number | null = null;
     let target = 0;
     let hint: string | null = null;
+    let partial: PartialReading | null = null;
 
     if (note && f.frequency) {
-      if (s.tunerMode === 'strings') {
+      if (s.tunerMode === 'partials') {
+        // Natural partials of the chosen fundamental: brass without valves, harmonics on strings.
+        const freq = f.displayFrequency ?? f.frequency;
+        partial = nearestPartial(freq, midiToFrequency(s.partialFundamental, tuningOf(s)));
+        if (partial) {
+          target = partial.target;
+          cents = Math.max(-50, Math.min(50, partial.cents));
+          displayMidi = transpose(s.partialFundamental + partial.semitones, semis);
+        }
+      } else if (s.tunerMode === 'strings') {
         const inst = instrument();
         const tuning = tuningOf(s);
         // The smoothed frequency, so the needle is as steady here as in chromatic mode.
@@ -923,16 +1099,27 @@ export function mountTuner(root: HTMLElement) {
       if (suggestChip.textContent !== text) suggestChip.textContent = text;
     }
 
-    if (!held && !f.gated && !hearingSelf && !transient) {
-      recordTuningFrame(cents);
-      // At most 30 readings a second, so a 120 Hz screen does not count double.
-      const nowSec = nowMs / 1000;
-      if (s.tunerMode === 'chromatic' && note && displayMidi !== null && nowSec - lastTendencyAt >= 1 / 30) {
-        lastTendencyAt = nowSec;
-        pendingTend = addReading(pendingTend, ((displayMidi % 12) + 12) % 12, note.cents);
-        pendingCount++;
-        if (pendingCount % 30 === 0) renderTendencies();
+    const nowSec = nowMs / 1000;
+    const clean = !held && !f.gated && !hearingSelf && !transient;
+    if (clean) recordTuningFrame(cents);
+    // Tendencies count seconds of a note held steady for 300 ms, by concert pitch class for this tuning, so slides and attacks do not count.
+    const chromaticNote = s.tunerMode === 'chromatic' && clean && note ? note : null;
+    const weight = stableGate.update(chromaticNote?.midi ?? null, nowSec);
+    if (chromaticNote && weight > 0) {
+      const key = tendencyKey(tuningOf(s));
+      if (key !== pendingKey) {
+        flushTendencies();
+        pendingKey = key;
       }
+      pendingTend = addReading(pendingTend, chromaticNote.pitchClass, chromaticNote.cents, weight);
+    }
+    // Long tones: when a held note ends, say how steady it was.
+    if (s.tunerMode === 'chromatic' && !f.gated && !hearingSelf) showLongTone(longTones.push(nowSec, note && displayMidi !== null && !held ? displayMidi : null, note?.cents ?? 0));
+    voiced.frame(nowSec, !!note);
+    const stopAfter = s.tunerAutoStopMinutes;
+    if (stopAfter > 0 && voiced.silentFor(nowSec) >= stopAfter * 60) {
+      stopListening(`Stopped after ${stopAfter} ${stopAfter === 1 ? 'minute' : 'minutes'} of silence`);
+      return;
     }
     followNote(note && !held ? note.midi : null, f.time);
     if (s.tunerDisplay === 'strobe') {
@@ -943,8 +1130,8 @@ export function mountTuner(root: HTMLElement) {
     } else {
       strobeFrameTime = null;
     }
-    history.push({ t: f.time, cents });
-    while (history.length && f.time - history[0].t > HISTORY_SECONDS) history.shift();
+    history.push({ t: f.time, cents, midi: cents === null ? null : displayMidi });
+    while (history.length && f.time - history[0].t > TRACE_BUFFER_SECONDS) history.shift();
 
     // Hysteresis keeps the in-tune state from flickering at the edge of the range.
     const { inTune, hold, fire } = transient ? { inTune: false, hold: 0, fire: false } : inTuneLatch.update(cents, displayMidi, nowMs / 1000, s.tolerance);
@@ -962,66 +1149,105 @@ export function mountTuner(root: HTMLElement) {
     placeBarZone(s.tolerance);
     sonify(s.sonify && tracker.running ? cents : null, s.tolerance);
 
+    const ringShown = s.tunerDisplay === 'ring';
     if (displayMidi === null || cents === null) {
       if (s.keepLastNote && shownAt !== null) {
         // Leave the last reading up, greyed, with its age.
-        root.querySelector('.tuner')?.classList.add('stale');
+        view.classList.add('stale');
         agoEl.hidden = false;
-        const ago = agoText((nowMs - shownAt) / 1000);
-        if (agoEl.textContent !== ago) agoEl.textContent = ago;
+        setText(agoEl, agoText((nowMs - shownAt) / 1000));
         drawTrace();
         return;
       }
       clearStale();
-      ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats, range);
-      root.querySelector('.tuner')?.classList.remove('has-note');
-      barNeedle.style.left = '50%';
+      if (ringShown) ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats, range);
+      view.classList.remove('has-note');
+      placeNeedle(0);
+      vsEqualEl.hidden = true;
       drawTrace();
       return;
     }
 
-    root.querySelector('.tuner')?.classList.add('has-note');
+    view.classList.add('has-note');
     clearStale();
     shownAt = nowMs;
-    const pretty = prettyName(noteName(displayMidi, s.flats, false));
-    const accidental = pretty.match(/[♯♭]/)?.[0] ?? '';
-    noteEl.textContent = pretty.replace(accidental, '');
-    noteEl.classList.toggle('long', noteEl.textContent.length > 1);
-    accidentalEl.textContent = accidental;
-    octaveEl.textContent = String(Math.floor(displayMidi / 12) - 1);
+    const parts = noteParts(displayMidi, s.flats);
+    const octave = String(Math.floor(displayMidi / 12) - 1);
+    setText(noteEl, parts.letter);
+    noteEl.classList.toggle('long', parts.letter.length > 1);
+    setText(accidentalEl, parts.accidental);
+    setText(octaveEl, octave);
     // Words as well as colour, so the state reads without relying on colour vision.
     const decimals = useDecimalCents(s.decimalCents, s.tolerance);
     const direction = centsText(cents, decimals);
     // The number stays next to "in tune", so fine work can still see it.
-    centsEl.textContent = hint ?? (inTune ? `${signedCents(cents, decimals)} in tune` : direction);
-    barNote.textContent = `${pretty}${Math.floor(displayMidi / 12) - 1}`;
-    barCents.textContent = hint ?? (inTune ? `${signedCents(cents, decimals)} in tune` : direction);
-    if (!held) announce(`${pretty.replace('♯', ' sharp').replace('♭', ' flat')}, ${hint ?? (inTune ? 'in tune' : direction.replace('¢', ' cents'))}`);
-    strobeNote.textContent = barNote.textContent;
-    strobeCents.textContent = barCents.textContent;
-    barNeedle.style.left = `${centsToPercent(cents, range)}%`;
+    const centsLine = hint ?? (inTune ? `${signedCents(cents, decimals)} in tune` : direction);
+    setText(centsEl, centsLine);
+    setText(barNote, `${parts.pretty}${octave}`);
+    setText(barCents, centsLine);
+    if (!held) announce(`${parts.pretty.replace('♯', ' sharp').replace('♭', ' flat')}, ${hint ?? (inTune ? 'in tune' : direction.replace('¢', ' cents'))}`);
+    setText(strobeNote, `${parts.pretty}${octave}`);
+    setText(strobeCents, centsLine);
+    if (s.tunerDisplay === 'bar') placeNeedle(cents);
     barMeter.classList.toggle('good', inTune);
 
-    ring.update({ pitchClass: ((displayMidi % 12) + 12) % 12, cents, inTune, hold }, s.tolerance, s.flats, range);
-    const stage = root.querySelector('.tuner');
-    stage?.classList.toggle('in-tune', inTune);
-    stage?.classList.toggle('sharp', !inTune && cents > 0);
-    stage?.classList.toggle('flat', !inTune && cents < 0);
+    if (ringShown) ring.update({ pitchClass: ((displayMidi % 12) + 12) % 12, cents, inTune, hold }, s.tolerance, s.flats, range);
+    view.classList.toggle('in-tune', inTune);
+    view.classList.toggle('sharp', !inTune && cents > 0);
+    view.classList.toggle('flat', !inTune && cents < 0);
     if (!held) {
       lastTarget = target;
       refBtn.disabled = false;
     }
-    freqEl.replaceChildren(
-      h('span', null, h('b', null, formatHz(f.frequency!)), ' Hz'),
-      h('span', { class: 'sep' }),
-      h('span', null, 'target ', h('b', null, formatHz(target)), ' Hz'),
-    );
+    freqMsg.hidden = true;
+    freqReading.hidden = false;
+    setText(freqHz, formatHz(f.frequency!));
+    setText(targetHz, formatHz(target));
+    // In a non-equal temperament, how far the reading is from the equal-tempered note as well.
+    if (partial) {
+      vsEqualEl.hidden = false;
+      setText(vsEqualEl, `Partial ${partial.n}, ${signedCents(partial.vsEqual, true)} vs equal`);
+    } else {
+      const vsEqual = s.tunerMode === 'chromatic' && note ? vsEqualCents(cents, note.midi, tuningOf(s)) : null;
+      vsEqualEl.hidden = vsEqual === null;
+      if (vsEqual !== null) setText(vsEqualEl, `vs equal ${signedCents(vsEqual, decimals)}`);
+    }
     drawTrace();
   });
 
   function clearStale() {
-    root.querySelector('.tuner')?.classList.remove('stale');
+    view.classList.remove('stale');
     agoEl.hidden = true;
+  }
+
+  /** Bar needle position by transform, from the meter width measured when it resizes. */
+  let meterWidth = 0;
+  let needleX = '';
+  const meterObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => (meterWidth = barMeter.clientWidth)) : null;
+  meterObserver?.observe(barMeter);
+  function placeNeedle(cents: number) {
+    const width = meterWidth || barMeter.clientWidth;
+    const x = `translateX(${(((centsToPercent(cents, range) - 50) / 100) * width).toFixed(1)}px)`;
+    if (x !== needleX) {
+      needleX = x;
+      barNeedle.style.transform = x;
+    }
+  }
+
+  let longToneShownAt = 0;
+  function showLongTone(note: HeldNote | null) {
+    if (!note) return;
+    const s = getSettings();
+    const parts = noteParts(note.midi, s.flats);
+    const seconds = (note.end - note.start).toFixed(1);
+    const drift = Math.round(note.drift);
+    longToneEl.textContent = `${parts.pretty}${Math.floor(note.midi / 12) - 1} held ${seconds} s, ±${note.spread.toFixed(1)}¢ spread, ${drift === 0 ? 'no drift' : `drifted ${drift > 0 ? '+' : '−'}${Math.abs(drift)}¢`}`;
+    longToneEl.hidden = false;
+    longToneShownAt = performance.now();
+    window.clearTimeout(longToneTimer);
+    longToneTimer = window.setTimeout(() => {
+      if (performance.now() - longToneShownAt >= 5900) longToneEl.hidden = true;
+    }, 6000);
   }
 
   function placeBarZone(tolerance: number) {
@@ -1031,45 +1257,122 @@ export function mountTuner(root: HTMLElement) {
     if (barZone.style.width !== width) barZone.style.width = width;
   }
 
-  function drawTrace() {
+  let traceDrawnAt = 0;
+  /** Draws the trace at up to 30 frames a second (every call when `force`), one path per colour. */
+  function drawTrace(force = false) {
+    const nowMs = performance.now();
+    if (!force && nowMs - traceDrawnAt < 33) return;
+    traceDrawnAt = nowMs;
     const ctx = fitCanvas(trace);
     const w = trace.clientWidth;
     const hh = trace.clientHeight;
     ctx.clearRect(0, 0, w, hh);
-    const tol = getSettings().tolerance;
+    const s = getSettings();
+    const tol = s.tolerance;
+    const colours = palette();
     const y = (c: number) => centsToY(c, range, hh);
-    ctx.fillStyle = cssVar('--good-soft');
+    ctx.fillStyle = colours.goodSoft;
     ctx.fillRect(0, y(Math.max(tol, 1)), w, y(-Math.max(tol, 1)) - y(Math.max(tol, 1)));
-    if (performance.now() - traceTextAt > 1000) {
-      traceTextAt = performance.now();
-      const text = traceSummary(history, tol, HISTORY_SECONDS);
-      if (traceText.textContent !== text) traceText.textContent = text;
-    }
     if (!history.length) return;
-    const now = history[history.length - 1].t;
-    const good = cssVar('--good');
-    const sharp = cssVar('--sharp');
-    const flat = cssVar('--flat');
+    const newest = history[history.length - 1].t;
+    if (traceFrozenAt !== null) traceOffset = clampTraceOffset(traceOffset, traceFrozenAt, history[0].t, HISTORY_SECONDS);
+    const end = (traceFrozenAt ?? newest) - traceOffset;
+    if (nowMs - traceTextAt > 1000) {
+      traceTextAt = nowMs;
+      setText(traceText, traceSummary(history.filter((p) => p.t > end - HISTORY_SECONDS && p.t <= end), tol, HISTORY_SECONDS));
+    }
+    const paths = { good: new Path2D(), sharp: new Path2D(), flat: new Path2D() };
+    const labels: { x: number; y: number; text: string }[] = [];
+    for (const run of traceRuns(history, end, HISTORY_SECONDS)) {
+      let prev: { x: number; y: number } | null = null;
+      for (const p of run.points) {
+        const x = w - ((end - p.t) / HISTORY_SECONDS) * w;
+        const c = Math.max(-range, Math.min(range, p.cents));
+        const yy = y(c);
+        if (prev) {
+          const path = Math.abs(c) <= tol ? paths.good : c > 0 ? paths.sharp : paths.flat;
+          path.moveTo(prev.x, prev.y);
+          path.lineTo(x, yy);
+        } else {
+          labels.push({ x: Math.max(2, x), y: yy, text: `${noteParts(run.midi, s.flats).pretty}${Math.floor(run.midi / 12) - 1}` });
+        }
+        prev = { x, y: yy };
+      }
+    }
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
-    let prev: { x: number; y: number } | null = null;
-    for (const p of history) {
-      const x = w - ((now - p.t) / HISTORY_SECONDS) * w;
-      if (p.cents === null) {
-        prev = null;
-        continue;
-      }
-      const c = Math.max(-range, Math.min(range, p.cents));
-      const yy = y(c);
-      if (prev) {
-        ctx.strokeStyle = Math.abs(c) <= tol ? good : c > 0 ? sharp : flat;
-        ctx.beginPath();
-        ctx.moveTo(prev.x, prev.y);
-        ctx.lineTo(x, yy);
-        ctx.stroke();
-      }
-      prev = { x, y: yy };
+    ctx.strokeStyle = colours.good;
+    ctx.stroke(paths.good);
+    ctx.strokeStyle = colours.sharp;
+    ctx.stroke(paths.sharp);
+    ctx.strokeStyle = colours.flat;
+    ctx.stroke(paths.flat);
+    // Each note's name where its line starts, so a change from A to B reads as two notes.
+    ctx.font = '600 10px system-ui, sans-serif';
+    ctx.fillStyle = colours.muted;
+    let lastLabelX = -Infinity;
+    for (const l of labels) {
+      if (l.x - lastLabelX < 26) continue;
+      lastLabelX = l.x;
+      ctx.fillText(l.text, l.x, l.y > hh / 2 ? l.y - 6 : l.y + 13);
     }
+  }
+
+  /* ----- Trace: tap to pause, drag to scroll back ----- */
+  let traceDrag: { x: number; offset: number; moved: boolean } | null = null;
+  trace.addEventListener('pointerdown', (e) => {
+    traceDrag = { x: e.clientX, offset: traceOffset, moved: false };
+  });
+  trace.addEventListener('pointermove', (e) => {
+    if (!traceDrag || !history.length) return;
+    const dx = e.clientX - traceDrag.x;
+    if (!traceDrag.moved && Math.abs(dx) < 6) return;
+    traceDrag.moved = true;
+    traceFrozenAt ??= history[history.length - 1].t;
+    traceOffset = traceDrag.offset + (dx / Math.max(1, trace.clientWidth)) * HISTORY_SECONDS;
+    renderTraceLabel();
+    drawTrace(true);
+  });
+  const endTraceDrag = () => {
+    if (!traceDrag) return;
+    if (!traceDrag.moved) {
+      // A tap pauses the trace, or resumes it at the newest reading.
+      traceFrozenAt = traceFrozenAt === null && history.length ? history[history.length - 1].t : null;
+      traceOffset = 0;
+      renderTraceLabel();
+      drawTrace(true);
+    }
+    traceDrag = null;
+  };
+  trace.addEventListener('pointerup', endTraceDrag);
+  trace.addEventListener('pointercancel', () => (traceDrag = null));
+  const traceTitle = h('span', null, 'Last 10 seconds');
+  function renderTraceLabel() {
+    setText(traceTitle, traceFrozenAt === null ? 'Last 10 seconds' : traceOffset > 0.5 ? `Paused, ${Math.round(traceOffset)} s back` : 'Paused. Drag to scroll back, tap to resume');
+  }
+
+  /* ----- Partials mode ----- */
+  // The fundamental is stored in concert pitch and listed in written pitch.
+  const partialSelect = select([], getSettings().partialFundamental, (v) => updateSettings({ partialFundamental: Number(v) }), { 'aria-label': 'Fundamental', class: 'compact' });
+  const partialsPanel = h(
+    'div',
+    { class: 'strings-panel partials-panel' },
+    h('label', { class: 'row wrap tight' }, h('span', { class: 'muted small' }, 'Fundamental'), partialSelect),
+    h('small', { class: 'muted' }, 'Shows which natural partial you are playing and how far that partial sits from equal temperament.'),
+  );
+  function renderPartialOptions(s: Settings) {
+    const semis = TRANSPOSITIONS.find((t) => t.id === s.transposition)?.semitones ?? 0;
+    const key = `${semis}|${s.flats}|${s.notation}`;
+    if (partialSelect.dataset.key !== key) {
+      partialSelect.dataset.key = key;
+      partialSelect.replaceChildren(
+        ...Array.from({ length: 49 }, (_, k) => 24 + k).map((m) => {
+          const w = transpose(m, semis);
+          return h('option', { value: String(m) }, `${prettyName(noteName(w, s.flats, false))}${Math.floor(w / 12) - 1}`);
+        }),
+      );
+    }
+    partialSelect.value = String(s.partialFundamental);
   }
 
   /* ----- Layout ----- */
@@ -1078,6 +1381,7 @@ export function mountTuner(root: HTMLElement) {
     [
       { value: 'chromatic', label: 'Chromatic', icon: 'tuner' },
       { value: 'strings', label: 'Strings', icon: 'strings' },
+      { value: 'partials', label: 'Partials' },
     ],
     s0.tunerMode,
     (v) => updateSettings({ tunerMode: v as Settings['tunerMode'] }),
@@ -1094,23 +1398,36 @@ export function mountTuner(root: HTMLElement) {
     'Display style',
   );
 
-  const view = h(
-    'section',
-    { class: 'view tuner' },
-    h('div', { class: 'toolbar' }, modeSeg, h('div', { class: 'toolbar-end' }, displaySeg, iconButton('gear', 'Tuner options', () => openTunerOptions({ calibrate })))),
+  const resetTendencies = () => {
+    pendingTend = {};
+    clearTendencies();
+    renderTendencies();
+  };
+  view.append(
+    h('div', { class: 'toolbar' }, modeSeg, h('div', { class: 'toolbar-end' }, displaySeg, iconButton('gear', 'Tuner options', () => openTunerOptions({ calibrate, resetTendencies })))),
     stringsPanel,
+    partialsPanel,
     display,
     h('div', { class: 'level-row' }, h('div', { class: 'level', role: 'meter', 'aria-label': 'Input level' }, levelFill, levelTick), clipLight, levelStatus),
     h('div', { class: 'meta-row' }, startBtn, freqEl, agoEl, refBadge, refBtn),
+    longToneEl,
     errorSlot,
     noticeSlot,
     clickNotice,
-    h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, h('span', null, 'Last 10 seconds'), h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace, traceText),
+    h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, traceTitle, h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace, traceText),
     tendPanel,
   );
   root.append(view);
 
   let micKey = `${s0.micDeviceId}|${s0.micChannel}`;
+  /** Settings that change what the tendencies panel shows; other writes (tempo, practice log) skip rebuilding it. */
+  let tendKey = '';
+  const onColourScheme = () => {
+    colors = null;
+    drawTrace(true);
+  };
+  const schemeQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+  schemeQuery?.addEventListener?.('change', onColourScheme);
   function applySettings() {
     const s = getSettings();
     const key = `${s.micDeviceId}|${s.micChannel}`;
@@ -1118,10 +1435,17 @@ export function mountTuner(root: HTMLElement) {
       micKey = key;
       if (tracker.running) void toggle().then(() => toggle());
     }
+    // The theme may have changed; read colours again on the next draw.
+    colors = null;
     levelTick.style.left = `${meterPosition(s.sensitivity) * 100}%`;
     view.dataset.display = s.tunerDisplay;
     view.dataset.mode = s.tunerMode;
+    view.dataset.damping = s.damping;
+    ring.setFixed(s.ringFixed);
+    ring.setOffsets(pitchClassOffsets(tuningOf(s), TRANSPOSITIONS.find((t) => t.id === s.transposition)?.semitones ?? 0));
     stringsPanel.hidden = s.tunerMode !== 'strings';
+    partialsPanel.hidden = s.tunerMode !== 'partials';
+    renderPartialOptions(s);
     modeSeg.set(s.tunerMode);
     displaySeg.set(s.tunerDisplay);
     inTuneLatch.setHoldSeconds(s.tunerHoldSeconds);
@@ -1138,37 +1462,101 @@ export function mountTuner(root: HTMLElement) {
     instrumentSelect.value = instrument().id;
     editChip.textContent = s.stringInstrument.startsWith(CUSTOM_TUNING_PREFIX) ? 'Edit tuning' : 'New tuning';
     if (s.tunerMode === 'strings') renderStrings(manualString, null);
-    // Only reset the display when idle; settings also change while tuning (e.g. saving tendencies).
-    if (!tracker.running && !root.querySelector('.tuner.stale')) ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats, range);
+    // Only reset the display when idle; settings also change while tuning (e.g. tempo changes from the trainer).
+    if (!tracker.running && !view.classList.contains('stale')) ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats, range);
     tendPanel.hidden = s.tunerMode !== 'chromatic';
-    renderTendencies();
-    drawTrace();
+    const tk = `${tendencyKey(tuningOf(s))}|${s.transposition}|${s.flats}|${s.notation}|${s.tolerance}|${s.tunerMode}`;
+    if (tk !== tendKey) {
+      tendKey = tk;
+      renderTendencies();
+    }
+    drawTrace(true);
     if (s.tunerDisplay === 'strobe') drawStrobe(null, null);
   }
   applySettings();
   const offSettings = subscribeSettings(applySettings);
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLButtonElement) return;
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || (t instanceof HTMLElement && t.isContentEditable)) return;
+    if (document.querySelector('.sheet-layer.open')) return;
+    // A button focused from the keyboard keeps Space and Enter; one that was just clicked does not swallow them.
+    const keyboardButton = t instanceof HTMLButtonElement && t.matches(':focus-visible');
+    const s = getSettings();
+    const key = e.key.toLowerCase();
     if (e.code === 'Space') {
+      if (keyboardButton) return;
       e.preventDefault();
       void toggle();
+    } else if (e.key === 'Enter') {
+      if (keyboardButton || !lastTarget) return;
+      e.preventDefault();
+      refBtn.click();
+    } else if (key === 'r' || key === 'b' || key === 's') {
+      e.preventDefault();
+      updateSettings({ tunerDisplay: key === 'r' ? 'ring' : key === 'b' ? 'bar' : 'strobe' });
+    } else if (e.key === '[' || e.key === ']') {
+      e.preventDefault();
+      updateSettings((cur) => ({ a4: clampA4(cur.a4 + (e.key === ']' ? 0.5 : -0.5)) }));
+    } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && s.tunerMode === 'strings') {
+      e.preventDefault();
+      const count = instrument().strings.length;
+      const from = manualString ?? (e.key === 'ArrowRight' ? -1 : count);
+      manualString = Math.max(0, Math.min(count - 1, from + (e.key === 'ArrowRight' ? 1 : -1)));
+      renderStrings(manualString, null);
     }
   };
   window.addEventListener('keydown', onKey);
-  const onResize = () => drawTrace();
+  const onResize = () => drawTrace(true);
   window.addEventListener('resize', onResize);
+
+  let cleanupGesture = () => {};
+  // Start straight away when asked to, or when the tuner was listening when you left it, if the mic is already allowed.
+  void (async () => {
+    const s = getSettings();
+    if (!(s.tunerAutoStart || tunerWasRunning) || !(await micGranted()) || disposed || tracker.running || document.visibilityState !== 'visible') return;
+    const ctx = getContext();
+    if (ctx.state !== 'running') {
+      void ctx.resume().catch(() => {});
+      await new Promise((r) => window.setTimeout(r, 300));
+    }
+    if (disposed || tracker.running) return;
+    if (ctx.state === 'running') {
+      await toggle();
+      return;
+    }
+    // The browser wants a gesture before audio runs: start on the first touch or key anywhere.
+    hint.textContent = 'Tap anywhere to start';
+    const onGesture = () => {
+      window.removeEventListener('pointerdown', onGesture, true);
+      window.removeEventListener('keydown', onGesture, true);
+      if (!disposed && !tracker.running && !starting) void toggle();
+    };
+    window.addEventListener('pointerdown', onGesture, true);
+    window.addEventListener('keydown', onGesture, true);
+    cleanupGesture = () => {
+      window.removeEventListener('pointerdown', onGesture, true);
+      window.removeEventListener('keydown', onGesture, true);
+    };
+  })();
 
   return () => {
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('resize', onResize);
     document.removeEventListener('visibilitychange', onVisibility);
+    schemeQuery?.removeEventListener?.('change', onColourScheme);
+    meterObserver?.disconnect();
+    cleanupGesture();
     offFrame();
     offSettings();
     stopRef();
+    startToken++;
     tracker.stop();
-    timer.stop();
+    logPractice(voiced.seconds, 'tuner');
+    voiced.reset();
     window.clearInterval(flushTimer);
+    window.clearTimeout(longToneTimer);
     flushTendencies();
     stopFollow();
     disposed = true;

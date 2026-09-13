@@ -84,6 +84,11 @@ export function fitCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   return ctx;
 }
 
+/** Sets text only when it differs, so per-frame updates do not touch the DOM for nothing. */
+export function setText(el: Node, text: string): void {
+  if (el.textContent !== text) el.textContent = text;
+}
+
 export function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }

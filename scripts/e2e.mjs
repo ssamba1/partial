@@ -230,6 +230,26 @@ await check('tuner: fine range shows decimal cents on a ±10 scale and keeps the
   }
 });
 
+await check('tuner partials mode names the partial, and stopping clears the reading', async () => {
+  const setPrefs = (p) => run(`const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k) || '{}'); Object.assign(s, ${JSON.stringify(p)}); localStorage.setItem(k, JSON.stringify(s));`);
+  await open('tuner');
+  await setPrefs({ tunerMode: 'partials', partialFundamental: 46, tunerDisplay: 'ring' });
+  try {
+    await open('tuner');
+    const out = await run(`${FAKE_MIC} window.__fake.o.frequency.value = 440 * Math.pow(2, (46 - 69) / 12) * 5; document.querySelector('.tuner-toggle').click(); await wait(2500);
+      const vs = document.querySelector('.vs-equal').textContent;
+      const note = document.querySelector('.note-line').textContent;
+      document.querySelector('.tuner-toggle').click(); await wait(300);
+      return { vs, note, cleared: !document.querySelector('.tuner.has-note') && document.querySelector('.big-cents').textContent === '' };`);
+    assert(out.vs === 'Partial 5, −13.7¢ vs equal', `partial text ${out.vs}`);
+    assert(out.note.startsWith('D5'), `note ${out.note}`);
+    assert(out.cleared, 'display not cleared after stop');
+    return `${out.note}: ${out.vs}`;
+  } finally {
+    await setPrefs({ tunerMode: 'chromatic' });
+  }
+});
+
 const strobeMotion = async () => {
   await open('tuner');
   const out = await run(`${FAKE_MIC}

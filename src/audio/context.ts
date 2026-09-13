@@ -1,3 +1,5 @@
+import { micFailure, type MicFailureReason } from '../core/mic';
+
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let micStream: MediaStream | null = null;
@@ -26,7 +28,7 @@ export async function ensureRunning(): Promise<AudioContext> {
 }
 
 export class MicError extends Error {
-  constructor(message: string, readonly reason: 'denied' | 'unavailable' | 'insecure') {
+  constructor(message: string, readonly reason: MicFailureReason) {
     super(message);
   }
 }
@@ -74,11 +76,8 @@ export async function acquireMic(req: MicRequest = {}): Promise<MediaStream> {
       })
       .then((s) => (micStream = s))
       .catch((err) => {
-        const name = (err as DOMException)?.name;
-        if (name === 'NotAllowedError' || name === 'SecurityError') {
-          throw new MicError('Microphone permission was denied. Allow it in the browser and try again.', 'denied');
-        }
-        throw new MicError('No microphone could be opened.', 'unavailable');
+        const failure = micFailure((err as DOMException)?.name);
+        throw new MicError(failure.message, failure.reason);
       })
       .finally(() => (micPending = null));
     await micPending;
