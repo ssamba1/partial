@@ -248,6 +248,32 @@ await check('sheet music: import, annotate, half-page turn', async () => {
   return `${out.strokes} stroke(s), ${out.label}`;
 });
 
+await check('sheet music remembers the tempo used with a piece', async () => {
+  await open('sheet');
+  const out = await run(`
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const card = () => [...document.querySelectorAll('.score-card')].find((c) => c.textContent.includes('E2E'));
+    for (let i = 0; i < 40 && !card(); i++) await wait(250);
+    card().querySelector('.score-open').click();
+    for (let i = 0; i < 40 && !document.querySelector('canvas.page'); i++) await wait(250);
+    const metro = document.querySelector('.viewer-tools .tool-btn');
+    metro.click(); await wait(400); metro.click(); await wait(300);
+    const saved = document.querySelector('.dock-bpm b')?.textContent;
+    return saved;`);
+  // Change the tempo, reload, reopen the piece.
+  await run(`const k = 'resonare.settings.v1'; const s = JSON.parse(localStorage.getItem(k)); s.metronome.bpm = 157; localStorage.setItem(k, JSON.stringify(s));`);
+  await open('sheet');
+  const restored = await run(`
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const card = () => [...document.querySelectorAll('.score-card')].find((c) => c.textContent.includes('E2E'));
+    for (let i = 0; i < 40 && !card(); i++) await wait(250);
+    card().querySelector('.score-open').click(); await wait(1500);
+    return JSON.parse(localStorage.getItem('resonare.settings.v1')).metronome.bpm;`);
+  assert(String(restored) === String(out), `saved ${out}, restored ${restored}`);
+  assert(restored !== 157, 'tempo was not restored');
+  return `restored ${restored} BPM`;
+});
+
 await check('offline: app and lazy sheet reader load with the server down', async () => {
   await open('tuner');
   const ready = await run(`const reg = await navigator.serviceWorker.ready; await new Promise((r) => setTimeout(r, 1500)); return !!reg.active;`);
