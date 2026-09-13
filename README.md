@@ -56,8 +56,9 @@ Resonare is an independent project and is not affiliated with TonalEnergy.
   levels and waveform. Swipe between views; tap to freeze.
 
 ### Record
-- Live waveform, optional metronome, playback at 0.5x to 1.25x with pitch
-  preserved, download.
+- Audio or video takes, live waveform, optional metronome, playback at 0.5x to
+  1.25x with pitch preserved, transpose playback by up to two semitones either
+  way without changing speed, download.
 - Intonation report per take: percent in tune, average cents, held notes, and
   the notes furthest from centre with their times.
 
@@ -83,7 +84,7 @@ Resonare is an independent project and is not affiliated with TonalEnergy.
 
 ## What is measured, and what is not
 
-The test suite (`npm test`, 76 tests) checks, among other things:
+The test suite (`npm test`, 82 tests) checks, among other things:
 
 - Pitch detection on synthesized tones: pure sines for every semitone from E1
   (41 Hz) to C7 (2093 Hz) within 0.5 cents; harmonic-rich tones with a weak
@@ -112,7 +113,8 @@ What I have not measured yet: accuracy with real instruments and microphones,
 audio latency on phones, and whether anything breaks in Safari or Firefox (all
 browser testing so far used Chrome and Edge). The timbres and click sounds are
 synthesized approximations rather than recordings. Ableton Link and spoken
-count-ins are missing.
+count-ins are missing. Transposing a take uses a simple WSOLA shifter that is
+fine for practice listening but audibly rougher than studio tools.
 
 ## Development
 
