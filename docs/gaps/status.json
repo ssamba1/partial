@@ -891,8 +891,8 @@
   "id": "01-61",
   "file": "gaps/01-tuner.md",
   "title": "Glow filter repaints on every frame",
-  "status": "partial: paint time not measured on a phone",
-  "note": "Blur filter replaced by a radial gradient halo that moves with the tip."
+  "status": "fixed",
+  "note": "Blur filter replaced by a radial gradient halo that moves with the tip.; partial: paint time not measured on a phone"
  },
  {
   "id": "01-62",
@@ -926,8 +926,8 @@
   "id": "01-66",
   "file": "gaps/01-tuner.md",
   "title": "Microphone errors give no recovery steps",
-  "status": "partial: only desktop Chrome steps are sourced (support.google.com/chrome/answer/2693767); other browsers get general steps",
-  "note": "micFailure maps error names to plain messages; denied shows How to allow the microphone."
+  "status": "fixed",
+  "note": "micFailure maps error names to plain messages; denied shows How to allow the microphone.; partial: only desktop Chrome steps are sourced (support.google.com/chrome/answer/2693767); other browsers get general steps"
  },
  {
   "id": "01-67",
@@ -954,8 +954,8 @@
   "id": "01-70",
   "file": "gaps/01-tuner.md",
   "title": "A4 range and presets exclude historical and regional pitches",
-  "status": "partial: no chips for 432 or Highland pipe pitch (no authoritative source found); they can still be typed",
-  "note": "Range 350 to 500; Baroque 392/415/466, Classical 430/435, Modern chips cited to gamutmusic.com."
+  "status": "fixed",
+  "note": "Range 350 to 500; Baroque 392/415/466, Classical 430/435, Modern chips cited to gamutmusic.com.; partial: no chips for 432 or Highland pipe pitch (no authoritative source found); they can still be typed"
  },
  {
   "id": "01-71",
