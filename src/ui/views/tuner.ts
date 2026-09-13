@@ -1,5 +1,6 @@
 import { ensureRunning, getMaster, MicError } from '../../audio/context';
-import { Drone } from '../../audio/voices';
+import { Drone, playTone } from '../../audio/voices';
+import { icon } from '../icons';
 import { formatCents } from '../../core/format';
 import { nearestString, STRING_INSTRUMENTS, stringFrequency } from '../../core/instruments';
 import { noteOff, noteOn } from '../../audio/droneBank';
@@ -161,6 +162,23 @@ export function mountTuner(root: HTMLElement) {
   }
 
   const freqEl = h('div', { class: 'tuner-meta' }, h('span', null, 'Play a note to begin'));
+  let lastTarget: number | null = null;
+  const refBtn = h(
+    'button',
+    {
+      class: 'chip ref-btn',
+      disabled: true,
+      title: 'Play the in-tune pitch of the last note',
+      onclick: async () => {
+        if (!lastTarget) return;
+        const ctx = await ensureRunning();
+        const s = getSettings();
+        playTone(ctx, getMaster(), ctx.currentTime + 0.02, lastTarget, 1.6, s.drone.timbre, Math.max(0.5, s.drone.volume));
+      },
+    },
+    icon('sound', 14),
+    'Hear target',
+  );
   const levelFill = h('div', { class: 'level-fill' });
   const trace = h('canvas', { class: 'trace', 'aria-hidden': 'true' });
   const errorSlot = h('div');
@@ -436,6 +454,10 @@ export function mountTuner(root: HTMLElement) {
     stage?.classList.toggle('in-tune', inTune);
     stage?.classList.toggle('sharp', !inTune && cents > 0);
     stage?.classList.toggle('flat', !inTune && cents < 0);
+    if (!f.held) {
+      lastTarget = target;
+      refBtn.disabled = false;
+    }
     freqEl.replaceChildren(
       h('span', null, h('b', null, f.frequency!.toFixed(1)), ' Hz'),
       h('span', { class: 'sep' }),
@@ -509,7 +531,7 @@ export function mountTuner(root: HTMLElement) {
     stringsPanel,
     display,
     h('div', { class: 'level' }, levelFill),
-    freqEl,
+    h('div', { class: 'meta-row' }, freqEl, refBtn),
     errorSlot,
     h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, h('span', null, 'Last 10 seconds'), h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace),
     tendPanel,

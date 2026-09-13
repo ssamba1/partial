@@ -5,8 +5,8 @@
   "start_url": "./#/tuner",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f6f5f1",
-  "theme_color": "#1f6f5c",
+  "background_color": "#090b0f",
+  "theme_color": "#6a5ae0",
   "icons": [
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }

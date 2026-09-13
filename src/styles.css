@@ -1672,6 +1672,20 @@ canvas.strobe-canvas {
   font-variant-numeric: tabular-nums;
   min-height: 1.5em;
 }
+.meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.meta-row .tuner-meta {
+  margin-top: 0;
+}
+.ref-btn:disabled {
+  opacity: 0.45;
+}
 .tuner-meta b {
   color: var(--text);
 }
