@@ -200,23 +200,93 @@ export function playClick(
   }
 }
 
-export type DroneTimbre = 'sine' | 'triangle' | 'sawtooth' | 'square' | 'organ' | 'reed' | 'strings';
+export type DroneTimbre = 'sine' | 'triangle' | 'sawtooth' | 'square' | 'organ' | 'reed' | 'strings' | 'cello' | 'clarinet' | 'flute' | 'voice';
 
 export const DRONE_TIMBRES: { id: DroneTimbre; label: string }[] = [
-  { id: 'sine', label: 'Pure (sine)' },
   { id: 'organ', label: 'Organ' },
-  { id: 'reed', label: 'Reed (odd harmonics)' },
+  { id: 'cello', label: 'Cello' },
   { id: 'strings', label: 'Strings' },
+  { id: 'clarinet', label: 'Clarinet' },
+  { id: 'flute', label: 'Flute' },
+  { id: 'voice', label: 'Voice (ah)' },
+  { id: 'reed', label: 'Reed' },
+  { id: 'sine', label: 'Pure (sine)' },
   { id: 'triangle', label: 'Triangle' },
   { id: 'sawtooth', label: 'Sawtooth' },
   { id: 'square', label: 'Square' },
 ];
+
+interface TimbreSpec {
+  /** Harmonic amplitudes (1st harmonic first) or a basic oscillator type. */
+  amps?: number[];
+  type?: OscillatorType;
+  lowpass: number;
+  /** Vibrato depth in cents (0 = none) and rate in Hz. */
+  vibrato: number;
+  rate: number;
+  /** Relative loudness so timbres sit at a similar level. */
+  gain: number;
+}
+
+// Synthesised approximations of instrument spectra, not samples.
+const TIMBRES: Record<DroneTimbre, TimbreSpec> = {
+  sine: { type: 'sine', lowpass: 12000, vibrato: 0, rate: 0, gain: 1.4 },
+  triangle: { type: 'triangle', lowpass: 12000, vibrato: 0, rate: 0, gain: 1.2 },
+  sawtooth: { type: 'sawtooth', lowpass: 8000, vibrato: 0, rate: 0, gain: 0.55 },
+  square: { type: 'square', lowpass: 8000, vibrato: 0, rate: 0, gain: 0.5 },
+  organ: { amps: [1, 0.5, 0.3, 0.25, 0.1, 0.08, 0, 0.05], lowpass: 8000, vibrato: 0, rate: 0, gain: 1 },
+  reed: { amps: [1, 0.05, 0.6, 0.04, 0.35, 0.03, 0.2, 0.02, 0.12], lowpass: 8000, vibrato: 0, rate: 0, gain: 1 },
+  strings: { amps: Array.from({ length: 16 }, (_, i) => 1 / (i + 1)), lowpass: 3500, vibrato: 3, rate: 5.2, gain: 0.9 },
+  cello: { amps: [1, 0.85, 0.65, 0.55, 0.4, 0.34, 0.24, 0.2, 0.14, 0.11, 0.08, 0.06], lowpass: 2600, vibrato: 5, rate: 5.4, gain: 0.8 },
+  clarinet: { amps: [1, 0.02, 0.78, 0.02, 0.52, 0.02, 0.3, 0.02, 0.17, 0.01, 0.1], lowpass: 3800, vibrato: 0, rate: 0, gain: 0.95 },
+  flute: { amps: [1, 0.32, 0.1, 0.04, 0.02], lowpass: 6000, vibrato: 4, rate: 5, gain: 1.2 },
+  voice: { amps: [1, 0.65, 0.38, 0.52, 0.42, 0.16, 0.09, 0.05, 0.04], lowpass: 3200, vibrato: 6, rate: 5.6, gain: 0.95 },
+};
+
+const waveCache = new WeakMap<BaseAudioContext, Map<DroneTimbre, PeriodicWave>>();
 
 function periodicWave(ctx: BaseAudioContext, amps: number[]): PeriodicWave {
   const real = new Float32Array(amps.length + 1);
   const imag = new Float32Array(amps.length + 1);
   amps.forEach((a, i) => (imag[i + 1] = a));
   return ctx.createPeriodicWave(real, imag);
+}
+
+function applyWave(ctx: BaseAudioContext, osc: OscillatorNode, timbre: DroneTimbre): TimbreSpec {
+  const spec = TIMBRES[timbre] ?? TIMBRES.organ;
+  if (spec.amps) {
+    let cache = waveCache.get(ctx);
+    if (!cache) waveCache.set(ctx, (cache = new Map()));
+    let wave = cache.get(timbre);
+    if (!wave) cache.set(timbre, (wave = periodicWave(ctx, spec.amps)));
+    osc.setPeriodicWave(wave);
+  } else {
+    osc.type = spec.type!;
+  }
+  return spec;
+}
+
+/** A single scheduled note with attack and release, for exercises and previews. */
+export function playTone(ctx: BaseAudioContext, dest: AudioNode, when: number, frequency: number, duration: number, timbre: DroneTimbre, volume: number): void {
+  const osc = ctx.createOscillator();
+  const spec = applyWave(ctx, osc, timbre);
+  osc.frequency.value = frequency;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = spec.lowpass;
+  const g = ctx.createGain();
+  const level = Math.max(0, volume) * 0.28 * spec.gain;
+  const attack = Math.min(0.03, duration / 4);
+  const release = Math.min(0.12, duration / 3);
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(level, when + attack);
+  g.gain.setValueAtTime(level, when + Math.max(attack, duration - release));
+  g.gain.linearRampToValueAtTime(0, when + duration);
+  osc.connect(filter);
+  filter.connect(g);
+  g.connect(dest);
+  osc.start(when);
+  osc.stop(when + duration + 0.02);
 }
 
 /** A sustained tone with smooth attack and release. */
@@ -249,38 +319,28 @@ export class Drone {
     this.setVolume(volume);
   }
 
+  private spec: TimbreSpec = TIMBRES.organ;
+  private volume = 0;
+
   setTimbre(timbre: DroneTimbre): void {
-    switch (timbre) {
-      case 'organ':
-        this.osc.setPeriodicWave(periodicWave(this.ctx, [1, 0.5, 0.3, 0.25, 0.1, 0.08, 0, 0.05]));
-        break;
-      case 'reed':
-        this.osc.setPeriodicWave(periodicWave(this.ctx, [1, 0.05, 0.6, 0.04, 0.35, 0.03, 0.2, 0.02, 0.12]));
-        break;
-      case 'strings': {
-        const amps = Array.from({ length: 16 }, (_, i) => 1 / (i + 1));
-        this.osc.setPeriodicWave(periodicWave(this.ctx, amps));
-        this.filter.frequency.value = 3500;
-        if (!this.vibrato) {
-          this.vibrato = this.ctx.createOscillator();
-          this.vibrato.frequency.value = 5.2;
-          const depth = this.ctx.createGain();
-          depth.gain.value = 3; // cents-ish detune depth via detune param
-          this.vibrato.connect(depth);
-          depth.connect(this.osc.detune);
-          this.vibrato.start();
-        }
-        return;
-      }
-      default:
-        this.osc.type = timbre;
-    }
-    this.filter.frequency.value = 8000;
+    this.spec = applyWave(this.ctx, this.osc, timbre);
+    this.filter.frequency.value = this.spec.lowpass;
     if (this.vibrato) {
       this.vibrato.stop();
       this.vibrato.disconnect();
       this.vibrato = null;
     }
+    if (this.spec.vibrato > 0) {
+      this.vibrato = this.ctx.createOscillator();
+      this.vibrato.frequency.value = this.spec.rate;
+      const depth = this.ctx.createGain();
+      // Oscillator detune is in cents, so the depth is in cents too.
+      depth.gain.value = this.spec.vibrato;
+      this.vibrato.connect(depth);
+      depth.connect(this.osc.detune);
+      this.vibrato.start();
+    }
+    this.setVolume(this.volume);
   }
 
   setFrequency(frequency: number): void {
@@ -288,8 +348,8 @@ export class Drone {
   }
 
   setVolume(volume: number): void {
-    // Square and sawtooth are much louder than sine at equal amplitude.
-    this.gain.gain.setTargetAtTime(Math.max(0, volume) * 0.25, this.ctx.currentTime, 0.05);
+    this.volume = volume;
+    this.gain.gain.setTargetAtTime(Math.max(0, volume) * 0.25 * this.spec.gain, this.ctx.currentTime, 0.05);
   }
 
   stop(): void {

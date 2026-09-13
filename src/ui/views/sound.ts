@@ -1,5 +1,8 @@
+import { ensureRunning, getMaster } from '../../audio/context';
 import { activeNotes, isOn, noteOff, noteOn, onDronesChange, setTimbreAll, stopAll, toggleNote } from '../../audio/droneBank';
-import { DRONE_TIMBRES, type DroneTimbre } from '../../audio/voices';
+import { LookaheadScheduler } from '../../audio/scheduler';
+import { DRONE_TIMBRES, playClick, playTone, type DroneTimbre } from '../../audio/voices';
+import { buildExercise, PATTERNS, type Direction, type Pattern } from '../../core/exercises';
 import { angleDelta, pointAngle } from '../../core/gestures';
 import { midiToFrequency, mod, noteName, prettyName } from '../../core/notes';
 import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
@@ -232,6 +235,11 @@ export function mountSound(root: HTMLElement) {
   );
   const chordSeg = segmented(CHORDS.map((c) => ({ value: c.id, label: c.label })), s0.drone.chord, (v) => updateSettings((s) => ({ drone: { ...s.drone, chord: v } })), 'Play as');
 
+  const exercise = exercisePlayer((midi) => {
+    wedges.forEach((g, pc) => g.classList.toggle('exercise', midi !== null && mod(midi, 12) === pc));
+    keys.querySelectorAll<HTMLElement>('.key').forEach((k) => k.classList.toggle('exercise', Number(k.dataset.midi) === midi));
+  });
+
   const view = h(
     'section',
     { class: 'view sound' },
@@ -262,6 +270,7 @@ export function mountSound(root: HTMLElement) {
       ),
     ),
     h('p', { class: 'hint-line' }, 'Drones follow the reference pitch and temperament, and keep sounding on other screens.'),
+    exercise.el,
   );
   root.append(view);
   buildPiano();
@@ -281,6 +290,115 @@ export function mountSound(root: HTMLElement) {
   return () => {
     offSettings();
     offDrones();
+    exercise.dispose();
     if (!sustain) stopAll();
   };
+}
+
+/* ---------- Exercise player ---------- */
+
+function exercisePlayer(onNote: (midi: number | null) => void): { el: HTMLElement; dispose: () => void } {
+  let pattern: Pattern = 'major';
+  let rootPc = 0;
+  let octave = 4;
+  let octaves = 1;
+  let direction: Direction = 'upDown';
+  let noteBeats = 1;
+  let droneOn = true;
+  let clickOn = false;
+  let loop = false;
+  let scheduler: LookaheadScheduler | null = null;
+  let droneMidi: number | null = null;
+
+  const status = h('span', { class: 'muted small' });
+  const playBtn = h('button', { class: 'transport-play', 'aria-label': 'Play exercise', onclick: () => void toggle() }, icon('play', 20));
+  const s0 = getSettings();
+
+  function stop() {
+    scheduler?.stop();
+    finish();
+  }
+
+  function finish() {
+    playBtn.replaceChildren(icon('play', 20));
+    onNote(null);
+    if (droneMidi !== null) {
+      noteOff(droneMidi);
+      droneMidi = null;
+    }
+    status.textContent = '';
+  }
+
+  async function toggle() {
+    if (scheduler?.isRunning) return stop();
+    const ctx = await ensureRunning();
+    scheduler ??= new LookaheadScheduler(ctx);
+    const root = (octave + 1) * 12 + rootPc;
+    const notes = buildExercise(pattern, root, octaves, direction);
+    const bpm = getSettings().metronome.bpm;
+    const dur = (60 / bpm) * noteBeats;
+    const s = getSettings();
+    const tuning = tuningOf(s);
+    if (droneOn) {
+      droneMidi = root - 12;
+      await noteOn(droneMidi);
+    }
+    let i = 0;
+    const lead = 2; // two clicks of count-in so you can come in
+    playBtn.replaceChildren(icon('stop', 18));
+    scheduler.start(
+      () => {
+        if (i >= notes.length + lead) return null;
+        const idx = i++;
+        return { time: idx * dur, bar: idx - lead, beat: 0, sub: 0, level: idx < lead ? 'accent' : 'normal', bpm, section: 0, countIn: idx < lead };
+      },
+      (e) => {
+        if (e.countIn) {
+          playClick(ctx, getMaster(), e.when, 'accent', 'tick', s.metronome.volume);
+          return;
+        }
+        const midi = notes[e.bar];
+        playTone(ctx, getMaster(), e.when, midiToFrequency(midi, tuning), dur * 0.92, s.drone.timbre, Math.max(0.35, s.drone.volume));
+        if (clickOn) playClick(ctx, getMaster(), e.when, 'normal', s.metronome.sound, s.metronome.volume * 0.7);
+      },
+      (e) => {
+        if (e.countIn) {
+          status.textContent = `Count-in ${e.bar + lead + 1}`;
+          return;
+        }
+        const midi = notes[e.bar];
+        onNote(midi);
+        status.textContent = `${prettyName(noteName(midi, getSettings().flats))} · ${e.bar + 1} of ${notes.length}`;
+      },
+      () => {
+        finish();
+        if (loop) void toggle();
+      },
+    );
+  }
+
+  const el = h(
+    'div',
+    { class: 'card exercise-card' },
+    h('div', { class: 'card-head' }, h('h3', null, 'Exercise player'), h('span', { class: 'muted small' }, 'Plays at the metronome tempo')),
+    h(
+      'div',
+      { class: 'grid exercise-grid' },
+      field('Pattern', select(PATTERNS.map((p) => ({ value: p.id, label: p.label })), pattern, (v) => (pattern = v as Pattern))),
+      field('Root', select(Array.from({ length: 12 }, (_, i) => ({ value: i, label: prettyName(noteName(i, s0.flats, false)) })), rootPc, (v) => (rootPc = Number(v)))),
+      field('Starting octave', select([2, 3, 4, 5].map((o) => ({ value: o, label: String(o) })), octave, (v) => (octave = Number(v)))),
+      field('Range', segmented(['1', '2', '3'].map((o) => ({ value: o, label: `${o} oct` })), String(octaves), (v) => (octaves = Number(v)), 'Range')),
+      field('Direction', segmented([{ value: 'up', label: 'Up' }, { value: 'down', label: 'Down' }, { value: 'upDown', label: 'Up & down' }], direction, (v) => (direction = v as Direction), 'Direction')),
+      field('Note length', segmented([{ value: '2', label: 'Half' }, { value: '1', label: 'Beat' }, { value: '0.5', label: 'Half beat' }], String(noteBeats), (v) => (noteBeats = Number(v)), 'Note length')),
+    ),
+    h(
+      'div',
+      { class: 'row wrap' },
+      h('label', { class: 'chip toggle' }, h('input', { type: 'checkbox', checked: droneOn, onchange: (e: Event) => (droneOn = (e.target as HTMLInputElement).checked) }), 'Drone on root'),
+      h('label', { class: 'chip toggle' }, h('input', { type: 'checkbox', checked: clickOn, onchange: (e: Event) => (clickOn = (e.target as HTMLInputElement).checked) }), 'Click'),
+      h('label', { class: 'chip toggle' }, h('input', { type: 'checkbox', checked: loop, onchange: (e: Event) => (loop = (e.target as HTMLInputElement).checked) }), 'Loop'),
+    ),
+    h('div', { class: 'exercise-transport' }, playBtn, status),
+  );
+  return { el, dispose: stop };
 }

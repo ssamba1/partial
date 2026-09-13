@@ -2988,6 +2988,32 @@ canvas.page {
   font-weight: 650;
 }
 
+.exercise-card {
+  margin-top: 26px;
+}
+.exercise-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  margin: 4px 0 8px;
+}
+.exercise-transport {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+}
+.wedge.exercise .wedge-shape {
+  fill: var(--brand);
+}
+.wedge.exercise .wedge-label,
+.wedge.exercise .wedge-freq {
+  fill: var(--brand-text);
+}
+.key.exercise.white {
+  background: linear-gradient(color-mix(in srgb, var(--brand) 40%, #fff), color-mix(in srgb, var(--brand) 65%, #fff));
+}
+.key.exercise.black {
+  background: var(--brand);
+}
 .interval-list {
   display: flex;
   flex-direction: column;
