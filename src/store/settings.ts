@@ -3,7 +3,8 @@ import type { MidiAction } from '../core/midi';
 import { setNotation, type Notation, type Temperament } from '../core/notes';
 import { dayKey } from '../core/practice';
 import type { AccentLevel, ClickTrack } from '../core/rhythm';
-import type { Damping } from '../audio/pitchTracker';
+import type { Damping } from '../core/tracking';
+import type { MicChannel } from '../core/mic';
 import type { DroneTimbre, ClickSound } from '../audio/voices';
 
 export type Activity = 'tuner' | 'metronome' | 'sound' | 'record' | 'analysis';
@@ -33,6 +34,10 @@ export interface Settings {
   tolerance: number;
   /** Mic gate as RMS. */
   sensitivity: number;
+  /** Chosen input device, or empty for the browser default. */
+  micDeviceId: string;
+  /** Which input of a stereo interface the tuner listens to. */
+  micChannel: MicChannel;
   damping: Damping;
   tunerDisplay: 'ring' | 'bar' | 'strobe';
   notation: Notation;
@@ -98,6 +103,8 @@ export const DEFAULT_SETTINGS: Settings = {
   flats: false,
   tolerance: 5,
   sensitivity: 0.008,
+  micDeviceId: '',
+  micChannel: 'mix',
   damping: 'normal',
   tunerDisplay: 'ring',
   notation: 'english',

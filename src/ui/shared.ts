@@ -1,5 +1,5 @@
 import { Metronome } from '../audio/metronome';
-import { PitchTracker } from '../audio/pitchTracker';
+import { PitchTracker, type TrackerOptions } from '../audio/pitchTracker';
 import { nearClick } from '../core/gestures';
 import { getSettings, logPractice, subscribeSettings, tuningOf, updateSettings, type Activity } from '../store/settings';
 
@@ -34,12 +34,15 @@ subscribeSettings((s) => {
   if (keys.some((k) => m[k] !== cur[k])) metronome.update(m);
 });
 
-export function createTracker(): PitchTracker {
+export function createTracker(extra: Partial<TrackerOptions> = {}): PitchTracker {
   return new PitchTracker({
     tuning: () => tuningOf(getSettings()),
     sensitivity: () => getSettings().sensitivity,
     damping: () => getSettings().damping,
     gate: (t) => getSettings().ignoreClick && metronome.playing && nearClick(t, metronome.recentClicks),
+    deviceId: () => getSettings().micDeviceId,
+    channel: () => getSettings().micChannel,
+    ...extra,
   });
 }
 

@@ -138,12 +138,18 @@ export function frequencyToNote(frequency: number, tuning: TuningSystem = DEFAUL
       best = m;
     }
   }
+  return readingForNote(frequency, best, tuning);
+}
+
+/** Reading of a frequency against a given note, however far away it is. */
+export function readingForNote(frequency: number, midi: number, tuning: TuningSystem = DEFAULT_TUNING): NoteReading {
+  const target = midiToFrequency(midi, tuning);
   return {
-    midi: best,
-    pitchClass: mod(best, 12),
-    octave: Math.floor(best / 12) - 1,
-    cents: bestCents,
-    target: midiToFrequency(best, tuning),
+    midi,
+    pitchClass: mod(midi, 12),
+    octave: Math.floor(midi / 12) - 1,
+    cents: ratioToCents(frequency / target),
+    target,
     frequency,
   };
 }

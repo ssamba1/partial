@@ -8,6 +8,69 @@ export function advanceStrobe(phase: number, cents: number, dtSeconds: number, b
   return ((next % 1) + 1) % 1;
 }
 
+/**
+ * In-tune state with hysteresis: enters at `tolerance`, leaves only beyond
+ * tolerance + max(0.5, 0.3 x tolerance), so noise at the edge does not flicker.
+ * The hold timer (for the lock haptic) survives excursions shorter than
+ * `graceSeconds` on the same note.
+ */
+export class InTuneLatch {
+  private inTune = false;
+  private since: number | null = null;
+  private outSince: number | null = null;
+  private note: number | null = null;
+  private fired = false;
+
+  constructor(
+    private holdSeconds = 1.2,
+    private graceSeconds = 0.15,
+  ) {}
+
+  update(cents: number | null, midi: number | null, time: number, tolerance: number): { inTune: boolean; hold: number; fire: boolean } {
+    if (cents === null || midi === null) {
+      this.reset();
+      return { inTune: false, hold: 0, fire: false };
+    }
+    if (midi !== this.note) {
+      this.reset();
+      this.note = midi;
+    }
+    const off = Math.abs(cents);
+    const exit = tolerance + Math.max(0.5, 0.3 * tolerance);
+    if (this.inTune) {
+      if (off > exit) {
+        this.inTune = false;
+        this.outSince = time;
+      }
+    } else if (off <= tolerance) {
+      this.inTune = true;
+      if (this.since === null || (this.outSince !== null && time - this.outSince >= this.graceSeconds)) {
+        this.since = time;
+        this.fired = false;
+      }
+      this.outSince = null;
+    } else if (this.since !== null && this.outSince !== null && time - this.outSince >= this.graceSeconds) {
+      this.since = null;
+      this.fired = false;
+    }
+    const hold = this.inTune && this.since !== null ? (time - this.since) / this.holdSeconds : 0;
+    let fire = false;
+    if (hold >= 1 && !this.fired) {
+      this.fired = true;
+      fire = true;
+    }
+    return { inTune: this.inTune, hold, fire };
+  }
+
+  reset(): void {
+    this.inTune = false;
+    this.since = null;
+    this.outSince = null;
+    this.note = null;
+    this.fired = false;
+  }
+}
+
 export interface NoteStat {
   count: number;
   sum: number;

@@ -179,6 +179,26 @@ await check('tuner reads correctly with the metronome running', async () => {
   return text;
 });
 
+await check('tuner pauses in the background and shows a threshold on the level meter', async () => {
+  await open('tuner');
+  const out = await run(`${FAKE_MIC} window.__fake.o.frequency.value = 440; document.querySelector('.tuner-stage').click(); await wait(1500);
+    const tuner = () => document.querySelector('.tuner');
+    const listening = tuner().classList.contains('listening');
+    const tick = !!document.querySelector('.level .level-tick');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange')); await wait(300);
+    const hidden = { listening: tuner().classList.contains('listening'), text: document.querySelector('.tuner-meta').textContent };
+    delete document.visibilityState;
+    document.dispatchEvent(new Event('visibilitychange')); await wait(1500);
+    const resumed = tuner().classList.contains('listening');
+    if (resumed) document.querySelector('.tuner-stage').click();
+    return { listening, tick, hidden, resumed };`);
+  assert(out.listening, 'tuner did not start');
+  assert(out.tick, 'no threshold tick');
+  assert(!out.hidden.listening && /background/.test(out.hidden.text), `hidden state ${JSON.stringify(out.hidden)}`);
+  return out.resumed ? 'paused, then resumed' : 'paused, waiting for a tap';
+});
+
 await check('metronome schedules exact 100 BPM triplets', async () => {
   await open('metronome');
   const gaps = await run(`

@@ -31,8 +31,29 @@ export class MicError extends Error {
   }
 }
 
-/** Shared microphone stream, reference counted so views can start and stop independently. */
-export async function acquireMic(): Promise<MediaStream> {
+export interface MicRequest {
+  /** Input device to open; empty or missing for the browser default. */
+  deviceId?: string;
+  /** Ask for two channels, for picking one input of a stereo interface. */
+  stereo?: boolean;
+}
+
+function micConstraints(req: MicRequest, withDevice: boolean): MediaTrackConstraints {
+  return {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    ...(req.stereo ? { channelCount: { ideal: 2 } } : {}),
+    ...(withDevice && req.deviceId ? { deviceId: { exact: req.deviceId } } : {}),
+  };
+}
+
+/**
+ * Shared microphone stream, reference counted so views can start and stop
+ * independently. The request only applies when the stream is opened; a caller
+ * joining an open stream gets that stream.
+ */
+export async function acquireMic(req: MicRequest = {}): Promise<MediaStream> {
   if (!window.isSecureContext) {
     throw new MicError('The microphone needs a secure (https or localhost) page.', 'insecure');
   }
@@ -42,7 +63,15 @@ export async function acquireMic(): Promise<MediaStream> {
   if (!micStream || micStream.getAudioTracks().every((t) => t.readyState === 'ended')) {
     // Share one in-flight request so two callers starting at once get the same stream.
     micPending ??= navigator.mediaDevices
-      .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .getUserMedia({ audio: micConstraints(req, true) })
+      .catch((err) => {
+        // A saved device that is unplugged or renamed: fall back to the default input.
+        const name = (err as DOMException)?.name;
+        if (req.deviceId && (name === 'OverconstrainedError' || name === 'NotFoundError')) {
+          return navigator.mediaDevices.getUserMedia({ audio: micConstraints(req, false) });
+        }
+        throw err;
+      })
       .then((s) => (micStream = s))
       .catch((err) => {
         const name = (err as DOMException)?.name;
@@ -56,6 +85,11 @@ export async function acquireMic(): Promise<MediaStream> {
   }
   micUsers++;
   return micStream!;
+}
+
+/** The open microphone track, if any. */
+export function currentMicTrack(): MediaStreamTrack | null {
+  return micStream?.getAudioTracks()[0] ?? null;
 }
 
 export function releaseMic(): void {

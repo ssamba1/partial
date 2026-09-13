@@ -471,49 +471,57 @@
   "id": "01-1",
   "file": "gaps/01-tuner.md",
   "title": "Low range breaks at 88.2 and 96 kHz sample rates",
-  "status": "open"
+  "status": "fixed",
+  "note": "Frame size from sample rate (4096 at 44.1/48k, 8192 at 88.2/96k); sweep tested at 4 rates. Uses 2x longest lag, not 4x, so 48k latency is unchanged"
  },
  {
   "id": "01-2",
   "file": "gaps/01-tuner.md",
   "title": "One octave-error frame goes straight through the median filter",
-  "status": "open"
+  "status": "fixed",
+  "note": "Smoother holds jumps until they last 2/3/4 frames; octave-error tests"
  },
  {
   "id": "01-3",
   "file": "gaps/01-tuner.md",
   "title": "Even-length median is biased sharp",
-  "status": "open"
+  "status": "fixed",
+  "note": "Even-length median averages middle values"
  },
  {
   "id": "01-4",
   "file": "gaps/01-tuner.md",
   "title": "No interpolation when the dip lands on the longest lag",
-  "status": "open"
+  "status": "fixed",
+  "note": "One extra lag computed so the last lag interpolates; still-falling dip returns null"
  },
  {
   "id": "01-5",
   "file": "gaps/01-tuner.md",
   "title": "Note name flickers at the quarter-tone boundary",
-  "status": "open"
+  "status": "fixed",
+  "note": "NoteLatch: keeps note until >58 cents for 3 readings (wide jumps switch at once)"
  },
  {
   "id": "01-6",
   "file": "gaps/01-tuner.md",
   "title": "In-tune state chatters at the tolerance edge",
-  "status": "open"
+  "status": "fixed",
+  "note": "InTuneLatch in intonation.ts with enter/exit thresholds and 150 ms grace for hold timer"
  },
  {
   "id": "01-7",
   "file": "gaps/01-tuner.md",
   "title": "Smoothing strength depends on screen refresh rate",
-  "status": "open"
+  "status": "fixed",
+  "note": "Smoothing timed in ms (span median, ramp-invariant glide); tendencies capped at 30 readings/s; 60 vs 120 Hz test"
  },
  {
   "id": "01-8",
   "file": "gaps/01-tuner.md",
   "title": "Mic stays open when the tab is hidden, but analysis stops",
-  "status": "open"
+  "status": "fixed",
+  "note": "Tuner stops on hidden tab, auto-resumes if mic permission granted, else shows tap to resume; e2e check"
  },
  {
   "id": "01-9",
@@ -533,61 +541,71 @@
   "id": "01-11",
   "file": "gaps/01-tuner.md",
   "title": "No input device choice",
-  "status": "open"
+  "status": "fixed",
+  "note": "Input select in tuner options, deviceId saved, falls back to default. No e2e: the e2e fake mic replaces getUserMedia"
  },
  {
   "id": "01-12",
   "file": "gaps/01-tuner.md",
   "title": "Stereo interfaces are downmixed",
-  "status": "open"
+  "status": "fixed",
+  "note": "Mix/Left/Right input channel via ChannelSplitter, stereo requested when needed; routing unit tests. partial: no OfflineAudioContext in node tests and no stereo hardware check"
  },
  {
   "id": "01-13",
   "file": "gaps/01-tuner.md",
   "title": "Mic processing flags are requested but never checked",
-  "status": "open"
+  "status": "fixed",
+  "note": "Reads track getSettings(); warns in options and under the tuner if processing stayed on"
  },
  {
   "id": "01-14",
   "file": "gaps/01-tuner.md",
   "title": "Bluetooth headset mics degrade silently",
-  "status": "open"
+  "status": "fixed",
+  "note": "Bluetooth warning by label or sampleRate <= 16000. partial: needs checking on real Bluetooth headsets per platform"
  },
  {
   "id": "01-15",
   "file": "gaps/01-tuner.md",
   "title": "Sensitivity uses fixed RMS values with no noise-floor calibration",
-  "status": "open"
+  "status": "fixed",
+  "note": "Calibrate to this room button: 2 s of noise, threshold max(0.001, 3x noise RMS). partial: optional continuous adaptation not done"
  },
  {
   "id": "01-16",
   "file": "gaps/01-tuner.md",
   "title": "Level meter cannot explain why nothing is detected",
-  "status": "open"
+  "status": "fixed",
+  "note": "dB meter with threshold tick, clip light with 1 s hold, No signal / Too quiet / Too low status"
  },
  {
   "id": "01-17",
   "file": "gaps/01-tuner.md",
   "title": "No filtering before detection",
-  "status": "open"
+  "status": "fixed",
+  "note": "High-pass at 0.7x lowest pitch (lowest string in strings mode) and 5 kHz low-pass before analyser; e2e 14 cent check still passes"
  },
  {
   "id": "01-18",
   "file": "gaps/01-tuner.md",
   "title": "DC offset keeps full detection running",
-  "status": "open"
+  "status": "fixed",
+  "note": "Level gate uses mean-removed RMS; DC-offset test counts lag-search runs"
  },
  {
   "id": "01-19",
   "file": "gaps/01-tuner.md",
   "title": "Worst-case YIN cost lands on noisy rooms",
-  "status": "open"
+  "status": "fixed",
+  "note": "FFT difference function (in-house FFT), matches direct sum; timing test ~0.5 ms vs ~6.8 ms per frame. Timing is a vitest test, not vitest bench"
  },
  {
   "id": "01-20",
   "file": "gaps/01-tuner.md",
   "title": "One frame length for every pitch",
-  "status": "open"
+  "status": "fixed",
+  "note": "detectPitchAdaptive re-runs on newest max(1024, 4 periods) samples above 300 Hz; A5 to B5 step test"
  },
  {
   "id": "01-21",

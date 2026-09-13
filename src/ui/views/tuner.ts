@@ -1,10 +1,12 @@
-import { ensureRunning, getMaster, MicError } from '../../audio/context';
+import { currentMicTrack, ensureRunning, getMaster, MicError } from '../../audio/context';
+import { MIN_FREQUENCY } from '../../audio/pitchTracker';
 import { Drone, playTone } from '../../audio/voices';
 import { icon } from '../icons';
 import { formatCents } from '../../core/format';
 import { nearestString, STRING_INSTRUMENTS, stringFrequency } from '../../core/instruments';
 import { noteOff, noteOn } from '../../audio/droneBank';
-import { addReading, advanceStrobe, summarize, type Tendencies } from '../../core/intonation';
+import { addReading, advanceStrobe, InTuneLatch, summarize, type Tendencies } from '../../core/intonation';
+import { calibratedThreshold, meterPosition, micWarnings, SignalStatus, zeroCrossingRate } from '../../core/mic';
 import { noteName, prettyName, TRANSPOSITIONS, transpose } from '../../core/notes';
 import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
 import { haptic, iconButton, openSheet, segmented } from '../components';
@@ -23,8 +25,70 @@ const RANGES: { value: string; label: string; cents: number }[] = [
   { value: '1', label: 'Ultra ±1', cents: 1 },
 ];
 
-function openTunerOptions() {
+interface OptionsTools {
+  /** Measures room noise for two seconds and returns the new threshold, or null if the mic could not start. */
+  calibrate: () => Promise<number | null>;
+}
+
+const SENSITIVITY_PRESETS = ['0.002', '0.008', '0.02'];
+
+function micWarningList(): string[] {
+  const track = currentMicTrack();
+  return track ? micWarnings({ label: track.label, settings: track.getSettings() }) : [];
+}
+
+function openTunerOptions(tools: OptionsTools) {
   const s = getSettings();
+  const deviceSelect = select([{ value: '', label: 'Default' }], s.micDeviceId, (v) => updateSettings({ micDeviceId: v }), { 'aria-label': 'Input' });
+  // Device names are only available after mic permission; before that the list may be blank.
+  void navigator.mediaDevices?.enumerateDevices?.().then((devices) => {
+    const inputs = devices.filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default');
+    deviceSelect.replaceChildren(
+      h('option', { value: '' }, 'Default'),
+      ...inputs.map((d, i) => h('option', { value: d.deviceId, selected: d.deviceId === getSettings().micDeviceId }, d.label || `Microphone ${i + 1}`)),
+    );
+    if (!inputs.some((d) => d.deviceId === getSettings().micDeviceId)) deviceSelect.value = '';
+  }).catch(() => {});
+  const customNote = h('small', null);
+  const showCustom = () => {
+    const v = getSettings().sensitivity;
+    customNote.textContent = SENSITIVITY_PRESETS.includes(String(v)) ? 'Calibrating measures 2 seconds of room noise. Stay quiet.' : `Calibrated: ${v}`;
+  };
+  showCustom();
+  const sensitivitySeg = segmented(
+    [
+      { value: '0.002', label: 'Quiet room' },
+      { value: '0.008', label: 'Normal' },
+      { value: '0.02', label: 'Noisy room' },
+    ],
+    String(s.sensitivity),
+    (v) => {
+      updateSettings({ sensitivity: Number(v) });
+      showCustom();
+    },
+    'Microphone sensitivity',
+  );
+  const calibrateBtn = h(
+    'button',
+    {
+      class: 'pill-btn',
+      onclick: async () => {
+        calibrateBtn.disabled = true;
+        calibrateBtn.textContent = 'Measuring, stay quiet';
+        const value = await tools.calibrate();
+        calibrateBtn.disabled = false;
+        calibrateBtn.textContent = 'Calibrate to this room';
+        if (value === null) {
+          customNote.textContent = 'Could not open the microphone.';
+          return;
+        }
+        sensitivitySeg.set(String(value));
+        showCustom();
+      },
+    },
+    'Calibrate to this room',
+  );
+  const warnings = micWarningList();
   const body = h(
     'div',
     { class: 'stack' },
@@ -54,17 +118,28 @@ function openTunerOptions() {
       'div',
       { class: 'field' },
       h('span', { class: 'field-label' }, 'Microphone'),
+      sensitivitySeg,
+      h('div', { class: 'row wrap tight' }, calibrateBtn),
+      customNote,
+    ),
+    h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Input'), deviceSelect),
+    h(
+      'div',
+      { class: 'field' },
+      h('span', { class: 'field-label' }, 'Input channel'),
       segmented(
         [
-          { value: '0.002', label: 'Quiet room' },
-          { value: '0.008', label: 'Normal' },
-          { value: '0.02', label: 'Noisy room' },
+          { value: 'mix', label: 'Mix' },
+          { value: 'left', label: 'Left' },
+          { value: 'right', label: 'Right' },
         ],
-        String(s.sensitivity),
-        (v) => updateSettings({ sensitivity: Number(v) }),
-        'Microphone sensitivity',
+        s.micChannel,
+        (v) => updateSettings({ micChannel: v as Settings['micChannel'] }),
+        'Input channel',
       ),
+      h('small', null, 'For a two-input interface, pick the input your instrument is plugged into.'),
     ),
+    ...warnings.map((w) => h('p', { class: 'mic-warning', role: 'note' }, w)),
     h(
       'label',
       { class: 'switch-row' },
@@ -92,12 +167,21 @@ function openTunerOptions() {
 }
 
 export function mountTuner(root: HTMLElement) {
-  const tracker = createTracker();
+  const tracker = createTracker({
+    lowestFrequency: () => {
+      const s = getSettings();
+      if (s.tunerMode !== 'strings') return MIN_FREQUENCY;
+      const inst = instrument();
+      let lowest = Infinity;
+      for (let i = 0; i < inst.strings.length; i++) lowest = Math.min(lowest, stringFrequency(inst, i, tuningOf(s), s.pureFifths));
+      return lowest;
+    },
+  });
   const timer = new ActivityTimer('tuner');
   const history: { t: number; cents: number | null }[] = [];
-  let inTuneSince: number | null = null;
-  let lockedNote: number | null = null;
-  let lockedFired = false;
+  const inTuneLatch = new InTuneLatch(HOLD_SECONDS);
+  const signal = new SignalStatus();
+  let lastTendencyAt = 0;
   let refDrone: { drone: Drone; index: number; timeout: number } | null = null;
   let manualString: number | null = null;
   let disposed = false;
@@ -181,6 +265,10 @@ export function mountTuner(root: HTMLElement) {
     'Hear target',
   );
   const levelFill = h('div', { class: 'level-fill' });
+  const levelTick = h('div', { class: 'level-tick', title: 'Sensitivity threshold' });
+  const clipLight = h('span', { class: 'clip-light', title: 'Input clipping' });
+  const levelStatus = h('span', { class: 'level-status', 'aria-live': 'polite' });
+  const noticeSlot = h('div');
   const trace = h('canvas', { class: 'trace', 'aria-hidden': 'true' });
   const errorSlot = h('div');
 
@@ -361,6 +449,8 @@ export function mountTuner(root: HTMLElement) {
       tracker.stop();
       timer.stop();
       stopFollow();
+      signal.reset();
+      noticeSlot.replaceChildren();
       root.querySelector('.tuner')?.classList.remove('listening');
       hint.textContent = 'Tap to start';
       freqEl.replaceChildren(h('span', null, 'Paused'));
@@ -368,19 +458,76 @@ export function mountTuner(root: HTMLElement) {
     }
     try {
       await tracker.start();
+      if (!tracker.running) return;
       timer.start();
       root.querySelector('.tuner')?.classList.add('listening');
       hint.textContent = 'Listening';
+      noticeSlot.replaceChildren(...micWarningList().map((w) => h('p', { class: 'mic-warning', role: 'note' }, w)));
     } catch (err) {
       const msg = err instanceof MicError ? err.message : 'Could not start the microphone.';
       errorSlot.replaceChildren(errorBox(msg, () => void toggle()));
     }
   }
 
+  /** Two seconds of room noise while the player stays quiet, turned into a mic threshold. */
+  async function calibrate(): Promise<number | null> {
+    const wasRunning = tracker.running;
+    if (!wasRunning) {
+      await toggle();
+      if (!tracker.running) return null;
+    }
+    const levels: number[] = [];
+    const off = tracker.onFrame((f) => levels.push(f.level));
+    await new Promise((r) => window.setTimeout(r, 2000));
+    off();
+    if (!wasRunning && tracker.running) await toggle();
+    const value = calibratedThreshold(levels);
+    updateSettings({ sensitivity: value });
+    return value;
+  }
+
+  /* ----- Pause in the background ----- */
+  // requestAnimationFrame stops in hidden tabs, so release the mic rather than keep it open unanalysed.
+  let pausedHidden = false;
+  async function micGranted(): Promise<boolean> {
+    try {
+      const p = await navigator.permissions?.query({ name: 'microphone' as PermissionName });
+      return p?.state === 'granted';
+    } catch {
+      return false;
+    }
+  }
+  const onVisibility = async () => {
+    if (document.visibilityState === 'hidden') {
+      if (!tracker.running) return;
+      pausedHidden = true;
+      await toggle();
+      freqEl.replaceChildren(h('span', null, 'Paused while in background. Tap to resume.'));
+      return;
+    }
+    if (!pausedHidden || disposed) return;
+    pausedHidden = false;
+    if (!tracker.running && (await micGranted()) && !disposed && document.visibilityState === 'visible') await toggle();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+
   /* ----- Frame handling ----- */
   const offFrame = tracker.onFrame((f) => {
     const s = getSettings();
-    levelFill.style.transform = `scaleX(${Math.min(1, Math.sqrt(f.level) * 2.5)})`;
+    levelFill.style.transform = `scaleX(${meterPosition(f.level)})`;
+    const threshold = s.sensitivity;
+    const noPitch = !f.note && !f.gated;
+    const status = signal.update({
+      time: performance.now() / 1000,
+      level: f.level,
+      peak: f.peak,
+      threshold,
+      hasPitch: !noPitch,
+      roughHz: noPitch && f.level >= threshold ? zeroCrossingRate(f.samples, f.sampleRate) : undefined,
+      lowestHz: MIN_FREQUENCY,
+    });
+    if (levelStatus.textContent !== status.message) levelStatus.textContent = status.message;
+    clipLight.classList.toggle('on', status.clip);
     const semis = TRANSPOSITIONS.find((t) => t.id === s.transposition)?.semitones ?? 0;
 
     let cents: number | null = null;
@@ -410,7 +557,10 @@ export function mountTuner(root: HTMLElement) {
 
     if (!f.held && !f.gated) {
       recordTuningFrame(cents);
-      if (s.tunerMode === 'chromatic' && f.note && displayMidi !== null) {
+      // At most 30 readings a second, so a 120 Hz screen does not count double.
+      const nowSec = performance.now() / 1000;
+      if (s.tunerMode === 'chromatic' && f.note && displayMidi !== null && nowSec - lastTendencyAt >= 1 / 30) {
+        lastTendencyAt = nowSec;
         pendingTend = addReading(pendingTend, ((displayMidi % 12) + 12) % 12, f.note.cents);
         pendingCount++;
         if (pendingCount % 30 === 0) renderTendencies();
@@ -421,22 +571,9 @@ export function mountTuner(root: HTMLElement) {
     history.push({ t: f.time, cents });
     while (history.length && f.time - history[0].t > HISTORY_SECONDS) history.shift();
 
-    const inTune = cents !== null && Math.abs(cents) <= s.tolerance;
-    if (inTune && displayMidi !== null) {
-      if (inTuneSince === null || lockedNote !== displayMidi) {
-        inTuneSince = f.time;
-        lockedNote = displayMidi;
-        lockedFired = false;
-      }
-    } else if (!f.held) {
-      inTuneSince = null;
-      lockedFired = false;
-    }
-    const hold = inTuneSince !== null ? (f.time - inTuneSince) / HOLD_SECONDS : 0;
-    if (hold >= 1 && !lockedFired) {
-      lockedFired = true;
-      haptic(12);
-    }
+    // Hysteresis keeps the in-tune state from flickering at the edge of the range.
+    const { inTune, hold, fire } = inTuneLatch.update(cents, displayMidi, performance.now() / 1000, s.tolerance);
+    if (fire) haptic(12);
 
     if (displayMidi === null || cents === null) {
       ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats);
@@ -542,19 +679,27 @@ export function mountTuner(root: HTMLElement) {
   const view = h(
     'section',
     { class: 'view tuner' },
-    h('div', { class: 'toolbar' }, modeSeg, h('div', { class: 'toolbar-end' }, displaySeg, iconButton('gear', 'Tuner options', openTunerOptions))),
+    h('div', { class: 'toolbar' }, modeSeg, h('div', { class: 'toolbar-end' }, displaySeg, iconButton('gear', 'Tuner options', () => openTunerOptions({ calibrate })))),
     stringsPanel,
     display,
-    h('div', { class: 'level' }, levelFill),
+    h('div', { class: 'level-row' }, h('div', { class: 'level', role: 'meter', 'aria-label': 'Input level' }, levelFill, levelTick), clipLight, levelStatus),
     h('div', { class: 'meta-row' }, freqEl, refBtn),
     errorSlot,
+    noticeSlot,
     h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, h('span', null, 'Last 10 seconds'), h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace),
     tendPanel,
   );
   root.append(view);
 
+  let micKey = `${s0.micDeviceId}|${s0.micChannel}`;
   function applySettings() {
     const s = getSettings();
+    const key = `${s.micDeviceId}|${s.micChannel}`;
+    if (key !== micKey) {
+      micKey = key;
+      if (tracker.running) void toggle().then(() => toggle());
+    }
+    levelTick.style.left = `${meterPosition(s.sensitivity) * 100}%`;
     view.dataset.display = s.tunerDisplay;
     view.dataset.mode = s.tunerMode;
     stringsPanel.hidden = s.tunerMode !== 'strings';
@@ -588,6 +733,7 @@ export function mountTuner(root: HTMLElement) {
   return () => {
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('resize', onResize);
+    document.removeEventListener('visibilitychange', onVisibility);
     offFrame();
     offSettings();
     stopRef();
