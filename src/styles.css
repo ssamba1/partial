@@ -1317,6 +1317,11 @@ button.link {
   stroke: var(--faint);
   stroke-width: 2;
 }
+.ring-svg .scale-label {
+  fill: var(--faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
 .ring-track {
   fill: none;
   stroke: var(--surface-3);
@@ -1519,6 +1524,17 @@ button.link {
   inset: 0 calc(50% - 1px);
   background: var(--text);
   opacity: 0.35;
+}
+.tuner.stale .pitch-ring,
+.tuner.stale .bar-view,
+.tuner.stale .strobe-view {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+.ago {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 canvas.strobe-canvas {
   display: block;

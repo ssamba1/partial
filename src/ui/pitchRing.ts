@@ -1,3 +1,4 @@
+import { centsToDegrees, ringLabels, ringTicks, signedLabel } from '../core/display';
 import { noteName, prettyName } from '../core/notes';
 import { svgEl } from './components';
 import { h } from './dom';
@@ -7,8 +8,6 @@ const C = SIZE / 2;
 const NOTE_R = 162;
 const ARC_R = 120;
 const HOLD_R = 96;
-/** Degrees of arc sweep per cent of deviation. */
-const DEG_PER_CENT = 2.4;
 
 function polar(r: number, deg: number): [number, number] {
   const a = (deg * Math.PI) / 180;
@@ -36,7 +35,8 @@ export interface RingReading {
 export interface PitchRing {
   el: HTMLElement;
   center: HTMLElement;
-  update: (r: RingReading, tolerance: number, flats: boolean) => void;
+  /** `range` is the cents either side of the top that the arc spans. */
+  update: (r: RingReading, tolerance: number, flats: boolean, range?: number) => void;
 }
 
 /**
@@ -55,15 +55,27 @@ export function createPitchRing(): PitchRing {
   defs.append(glow);
   svg.append(defs);
 
-  // Cents scale ticks around the arc radius.
+  // Cents scale ticks around the arc radius, numbered at half and full scale.
   const scale = svgEl('g', { class: 'ring-scale' });
-  for (let c = -50; c <= 50; c += 5) {
-    const deg = c * DEG_PER_CENT;
-    const long = c % 25 === 0;
-    const [x1, y1] = polar(ARC_R + 12, deg);
-    const [x2, y2] = polar(ARC_R + (long ? 22 : 17), deg);
-    scale.append(svgEl('line', { x1, y1, x2, y2, class: long ? 'tick long' : 'tick' }));
-  }
+  let scaleRange = 0;
+  const drawScale = (range: number) => {
+    if (range === scaleRange) return;
+    scaleRange = range;
+    scale.replaceChildren();
+    for (const t of ringTicks(range)) {
+      const deg = centsToDegrees(t.cents, range);
+      const [x1, y1] = polar(ARC_R + 12, deg);
+      const [x2, y2] = polar(ARC_R + (t.long ? 22 : 17), deg);
+      scale.append(svgEl('line', { x1, y1, x2, y2, class: t.long ? 'tick long' : 'tick' }));
+    }
+    for (const c of ringLabels(range)) {
+      const [x, y] = polar(ARC_R - 17, centsToDegrees(c, range));
+      const label = svgEl('text', { x, y, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'scale-label' });
+      label.textContent = signedLabel(c);
+      scale.append(label);
+    }
+  };
+  drawScale(50);
   svg.append(scale);
 
   svg.append(svgEl('circle', { cx: C, cy: C, r: ARC_R, class: 'ring-track' }));
@@ -123,13 +135,15 @@ export function createPitchRing(): PitchRing {
   };
   let lastKey = '';
 
-  const update = (r: RingReading, tolerance: number, flats: boolean) => {
+  const update = (r: RingReading, tolerance: number, flats: boolean, range = 50) => {
+    drawScale(range);
+    el.dataset.range = String(range);
     const key = `${flats}|${noteName(0, flats, false)}`;
     if (key !== lastKey) {
       layoutNotes(flats);
       lastKey = key;
     }
-    const tol = Math.max(0.5, tolerance) * DEG_PER_CENT;
+    const tol = centsToDegrees(Math.max(0.5, tolerance), range);
     zone.setAttribute('d', arcPath(ARC_R, -tol, tol));
 
     if (r.pitchClass !== null && r.pitchClass !== lastPc) {
@@ -155,7 +169,7 @@ export function createPitchRing(): PitchRing {
     el.classList.toggle('flat', active && !r.inTune && r.cents < 0);
     el.classList.toggle('locked', active && r.hold >= 1);
 
-    const deg = active ? Math.max(-50, Math.min(50, r.cents)) * DEG_PER_CENT : 0;
+    const deg = active ? centsToDegrees(r.cents, range) : 0;
     arc.setAttribute('d', active ? arcPath(ARC_R, Math.min(0, deg), Math.max(0, deg)) : '');
     const [tx, ty] = polar(ARC_R, deg);
     tip.setAttribute('cx', String(tx));

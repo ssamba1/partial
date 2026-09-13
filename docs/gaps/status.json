@@ -751,61 +751,71 @@
   "id": "01-41",
   "file": "gaps/01-tuner.md",
   "title": "Strobe ignores reduced motion",
-  "status": "open"
+  "status": "fixed",
+  "note": "With prefers-reduced-motion the strobe bands stand still, shifted by the cents error, with a short note; e2e emulates it"
  },
  {
   "id": "01-42",
   "file": "gaps/01-tuner.md",
   "title": "The strobe is not a real strobe",
-  "status": "open"
+  "status": "fixed",
+  "note": "Phase strobe: SampleClock aligns analyser buffers, Hann weighted quadrature demodulation, atan2 phase; unit test of 0.3 cent rate, e2e shows still bands in tune"
  },
  {
   "id": "01-43",
   "file": "gaps/01-tuner.md",
   "title": "Strobe partial rows are made up",
-  "status": "open"
+  "status": "fixed",
+  "note": "Rows demodulate at 2f and 4f, fade when that partial is weak, and are labelled; unit test with a 3 cent sharp second partial"
  },
  {
   "id": "01-44",
   "file": "gaps/01-tuner.md",
   "title": "Every display is fixed at ±50 cents",
-  "status": "open"
+  "status": "fixed",
+  "note": "Scale setting 50, 20, 10 or auto (zooms to 10 after 500 ms within 10 cents); pure mapping functions used by ring, bar and trace"
  },
  {
   "id": "01-45",
   "file": "gaps/01-tuner.md",
   "title": "Ring cents ticks have no numbers",
-  "status": "open"
+  "status": "fixed",
+  "note": "Ring labels at half and full scale, signed"
  },
  {
   "id": "01-46",
   "file": "gaps/01-tuner.md",
   "title": "Bar scale labels are wrong",
-  "status": "open"
+  "status": "fixed",
+  "note": "Bar labels every 20 cents at 50, every half scale when zoomed, signed"
  },
  {
   "id": "01-47",
   "file": "gaps/01-tuner.md",
   "title": "Readout precision too coarse for fine work",
-  "status": "open"
+  "status": "fixed",
+  "note": "Decimal cents option (auto at tolerance 2 or less), signed number kept next to in tune, two decimals of Hz below 100 Hz"
  },
  {
   "id": "01-48",
   "file": "gaps/01-tuner.md",
   "title": "Tolerance choices are limited",
-  "status": "open"
+  "status": "fixed",
+  "note": "Custom tolerance input from 0.5 to 25 cents, clamped in settings"
  },
  {
   "id": "01-49",
   "file": "gaps/01-tuner.md",
   "title": "In-tune lock is fixed and silent on iPhone",
-  "status": "open"
+  "status": "fixed",
+  "note": "Lock after 0.5 to 5 s and an optional chime gated from the tracker. partial: chime not tried on an iPhone"
  },
  {
   "id": "01-50",
   "file": "gaps/01-tuner.md",
   "title": "The reading disappears as soon as the note ends",
-  "status": "open"
+  "status": "fixed",
+  "note": "Keep last note on screen: greyed with N s ago until the next note; e2e checks it"
  },
  {
   "id": "01-51",

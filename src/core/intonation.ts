@@ -1,14 +1,4 @@
 /**
- * Strobe display phase. A strobe tuner shows a pattern that drifts right when
- * sharp and left when flat, and stands still when exactly in tune; the drift
- * speed is proportional to the error. Returns the new phase in [0, 1).
- */
-export function advanceStrobe(phase: number, cents: number, dtSeconds: number, bandsPerSecondPerCent = 0.08): number {
-  const next = phase + cents * bandsPerSecondPerCent * dtSeconds;
-  return ((next % 1) + 1) % 1;
-}
-
-/**
  * In-tune state with hysteresis: enters at `tolerance`, leaves only beyond
  * tolerance + max(0.5, 0.3 x tolerance), so noise at the edge does not flicker.
  * The hold timer (for the lock haptic) survives excursions shorter than
@@ -60,6 +50,11 @@ export class InTuneLatch {
       fire = true;
     }
     return { inTune: this.inTune, hold, fire };
+  }
+
+  /** Change how long a note must stay in tune before it locks. */
+  setHoldSeconds(seconds: number): void {
+    this.holdSeconds = seconds;
   }
 
   reset(): void {

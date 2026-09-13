@@ -7,6 +7,7 @@ import type { Damping } from '../core/tracking';
 import type { MicChannel } from '../core/mic';
 import type { ReferenceOctave } from '../core/selfsound';
 import { sanitizeTuning, type CustomTuning } from '../core/instruments';
+import { clampHoldSeconds, clampTolerance, type DecimalCents, type TunerScale } from '../core/display';
 import type { DroneTimbre, ClickSound } from '../audio/voices';
 
 export type Activity = 'tuner' | 'metronome' | 'sound' | 'record' | 'analysis';
@@ -66,6 +67,16 @@ export interface Settings {
   customTunings: CustomTuning[];
   /** Audio cues for tuning without looking: faster ticks for bigger errors. */
   sonify: boolean;
+  /** Cents either side of in tune shown by the ring, bar and trace. */
+  tunerScale: TunerScale;
+  /** Cents to one decimal; auto turns them on at a tolerance of 2 or less. */
+  decimalCents: DecimalCents;
+  /** Seconds in tune before the lock. */
+  tunerHoldSeconds: number;
+  /** Soft chime when a note locks in tune. */
+  lockChime: boolean;
+  /** Keep the last note on screen, greyed, after the sound stops. */
+  keepLastNote: boolean;
   metronome: {
     bpm: number;
     beatsPerBar: number;
@@ -133,6 +144,11 @@ export const DEFAULT_SETTINGS: Settings = {
   reference: { octave: 'same', timbre: 'drone', length: 'short', volume: 0.7 },
   customTunings: [],
   sonify: false,
+  tunerScale: '50',
+  decimalCents: 'auto',
+  tunerHoldSeconds: 1.2,
+  lockChime: false,
+  keepLastNote: false,
   metronome: {
     bpm: 100,
     beatsPerBar: 4,
@@ -182,6 +198,9 @@ export function mergeSettings(stored: Partial<Settings>): Settings {
     metronome: { ...DEFAULT_SETTINGS.metronome, ...stored.metronome },
     drone: { ...DEFAULT_SETTINGS.drone, ...stored.drone },
     reference: { ...DEFAULT_SETTINGS.reference, ...stored.reference },
+    tolerance: clampTolerance(stored.tolerance, DEFAULT_SETTINGS.tolerance),
+    tunerHoldSeconds: clampHoldSeconds(stored.tunerHoldSeconds, DEFAULT_SETTINGS.tunerHoldSeconds),
+    tunerScale: (['50', '20', '10', 'auto'] as const).includes(stored.tunerScale as TunerScale) ? (stored.tunerScale as TunerScale) : DEFAULT_SETTINGS.tunerScale,
     customTunings: Array.isArray(stored.customTunings) ? stored.customTunings.map(sanitizeTuning).filter((x): x is CustomTuning => x !== null) : [],
   };
 }

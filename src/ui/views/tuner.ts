@@ -1,14 +1,16 @@
 import { currentMicTrack, ensureRunning, getMaster, MicError } from '../../audio/context';
 import { MIN_FREQUENCY } from '../../audio/pitchTracker';
 import { Drone, DRONE_TIMBRES, playTone, type DroneTimbre } from '../../audio/voices';
-import { playCue } from '../../audio/cues';
+import { playChime, playCue } from '../../audio/cues';
+import { agoText, AutoScale, barLabels, centsText, centsToPercent, centsToY, clampHoldSeconds, clampTolerance, formatHz, scaleRange, signedCents, signedLabel, useDecimalCents, type DecimalCents, type TunerScale } from '../../core/display';
+import { PhaseStrobe, STROBE_PARTIALS, type StrobeRow } from '../../core/strobe';
 import { icon } from '../icons';
 import { formatCents, uid } from '../../core/format';
 import { allInstruments, CUSTOM_TUNING_PREFIX, sanitizeTuning, StringFollower, stringFrequency, stringMidi, suggestString, tuneHint, type StringInstrument } from '../../core/instruments';
 import { activeFrequencies, noteOff, noteOn } from '../../audio/droneBank';
 import { FollowState, matchesReference, referenceOctaves, sonifyInterval, type ReferenceOctave } from '../../core/selfsound';
 import { OnsetGate } from '../../core/tracking';
-import { addReading, advanceStrobe, InTuneLatch, summarize, traceSummary, type Tendencies } from '../../core/intonation';
+import { addReading, InTuneLatch, summarize, traceSummary, type Tendencies } from '../../core/intonation';
 import { calibratedThreshold, meterPosition, micWarnings, SignalStatus, zeroCrossingRate } from '../../core/mic';
 import { midiToFrequency, noteName, prettyName, TRANSPOSITIONS, transpose } from '../../core/notes';
 import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
@@ -19,7 +21,6 @@ import { createPitchRing } from '../pitchRing';
 import { ActivityTimer, createTracker, recordTuningFrame, selfSounds } from '../shared';
 
 const HISTORY_SECONDS = 10;
-const HOLD_SECONDS = 1.2;
 
 const RANGES: { value: string; label: string; cents: number }[] = [
   { value: '10', label: 'Wide ±10', cents: 10 },
@@ -92,6 +93,22 @@ function openTunerOptions(tools: OptionsTools) {
     'Calibrate to this room',
   );
   const warnings = micWarningList();
+  const toleranceInput = numberInput(s.tolerance, (n) => {
+    const v = clampTolerance(n);
+    toleranceInput.value = String(v);
+    rangeSeg.set(String(v));
+    updateSettings({ tolerance: v });
+  }, { min: 0.5, max: 25, step: 0.5, class: 'compact' });
+  toleranceInput.setAttribute('aria-label', 'Custom in-tune range in cents');
+  const rangeSeg = segmented(RANGES.map((r) => ({ value: r.value, label: r.label })), String(s.tolerance), (v) => {
+    toleranceInput.value = v;
+    updateSettings({ tolerance: Number(v) });
+  }, 'In-tune range');
+  const holdInput = numberInput(s.tunerHoldSeconds, (n) => {
+    const v = clampHoldSeconds(n);
+    holdInput.value = String(v);
+    updateSettings({ tunerHoldSeconds: v });
+  }, { min: 0.5, max: 5, step: 0.1, class: 'compact' });
   const body = h(
     'div',
     { class: 'stack' },
@@ -99,7 +116,59 @@ function openTunerOptions(tools: OptionsTools) {
       'div',
       { class: 'field' },
       h('span', { class: 'field-label' }, 'In-tune range'),
-      segmented(RANGES.map((r) => ({ value: r.value, label: r.label })), String(s.tolerance), (v) => updateSettings({ tolerance: Number(v) }), 'In-tune range'),
+      rangeSeg,
+      h('label', { class: 'row tight' }, h('span', null, 'Custom, cents'), toleranceInput),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h('span', { class: 'field-label' }, 'Scale'),
+      segmented(
+        [
+          { value: '50', label: '±50' },
+          { value: '20', label: '±20' },
+          { value: '10', label: '±10' },
+          { value: 'auto', label: 'Auto' },
+        ],
+        s.tunerScale,
+        (v) => updateSettings({ tunerScale: v as TunerScale }),
+        'Scale',
+      ),
+      h('small', null, 'Cents shown either side of in tune. Auto zooms to ±10 while you hold a note close.'),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h('span', { class: 'field-label' }, 'Decimal cents'),
+      segmented(
+        [
+          { value: 'auto', label: 'Auto' },
+          { value: 'on', label: 'On' },
+          { value: 'off', label: 'Off' },
+        ],
+        s.decimalCents,
+        (v) => updateSettings({ decimalCents: v as DecimalCents }),
+        'Decimal cents',
+      ),
+      h('small', null, 'Auto shows tenths of a cent when the range is ±2 or finer.'),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h('label', { class: 'row tight' }, h('span', { class: 'field-label' }, 'Lock after, seconds'), holdInput),
+      h('small', null, 'How long a note stays in tune before it locks.'),
+    ),
+    h(
+      'label',
+      { class: 'switch-row' },
+      h('span', null, h('strong', null, 'Chime on lock'), h('small', null, 'A short soft chime when a note locks in tune.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: s.lockChime, onchange: (e: Event) => updateSettings({ lockChime: (e.target as HTMLInputElement).checked }) }),
+    ),
+    h(
+      'label',
+      { class: 'switch-row' },
+      h('span', null, h('strong', null, 'Keep last note on screen'), h('small', null, 'After the sound stops, the last reading stays, greyed, until the next note.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: s.keepLastNote, onchange: (e: Event) => updateSettings({ keepLastNote: (e.target as HTMLInputElement).checked }) }),
     ),
     h(
       'div',
@@ -245,7 +314,15 @@ export function mountTuner(root: HTMLElement) {
   });
   const timer = new ActivityTimer('tuner');
   const history: { t: number; cents: number | null }[] = [];
-  const inTuneLatch = new InTuneLatch(HOLD_SECONDS);
+  const inTuneLatch = new InTuneLatch(getSettings().tunerHoldSeconds);
+  const autoScale = new AutoScale();
+  /** Cents either side of in tune that the ring, bar and trace span right now. */
+  let range = scaleRange(getSettings().tunerScale);
+  /** When the last note was on screen, for "Keep last note on screen". */
+  let shownAt: number | null = null;
+  const phaseStrobe = new PhaseStrobe();
+  let strobeFrameTime: number | null = null;
+  const reducedMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   const signal = new SignalStatus();
   let lastTendencyAt = 0;
   /** The one reference tone sounding: a string reference (index) or the hear-target tone (index null). */
@@ -268,11 +345,18 @@ export function mountTuner(root: HTMLElement) {
   const barZone = h('div', { class: 'bar-zone' });
   const barNote = h('div', { class: 'bar-note' }, 'Play a note');
   const barCents = h('div', { class: 'bar-cents' });
+  const barScale = h('div', { class: 'bar-scale' });
+  let barScaleRange = 0;
+  function renderBarScale() {
+    if (barScaleRange === range) return;
+    barScaleRange = range;
+    barScale.replaceChildren(...barLabels(range).map((c) => h('span', { style: `left:${centsToPercent(c, range)}%`, class: c === 0 ? 'major' : '' }, signedLabel(c))));
+  }
   const barMeter = h(
     'div',
     { class: 'bar-meter' },
     barZone,
-    h('div', { class: 'bar-scale' }, ...[-50, -40, -30, -20, -10, 0, 10, 20, 30, 40, 50].map((c) => h('span', { style: `left:${50 + c}%`, class: c % 50 === 0 || c === 0 ? 'major' : '' }, c % 25 === 0 ? String(Math.abs(c)) : ''))),
+    barScale,
     barNeedle,
   );
   const barView = h('div', { class: 'bar-view' }, h('div', { class: 'bar-head' }, barNote, barCents), barMeter, h('div', { class: 'bar-legend' }, h('span', null, '♭ flat'), h('span', null, 'sharp ♯')));
@@ -281,33 +365,41 @@ export function mountTuner(root: HTMLElement) {
   const strobeCanvas = h('canvas', { class: 'strobe-canvas', 'aria-hidden': 'true' });
   const strobeNote = h('div', { class: 'bar-note' }, 'Play a note');
   const strobeCents = h('div', { class: 'bar-cents' });
+  const strobeMotion = h('small', { class: 'muted', hidden: true }, 'Motion reduced: bands shift by the error instead of moving.');
   const strobeView = h(
     'div',
     { class: 'strobe-view' },
     h('div', { class: 'bar-head' }, strobeNote, strobeCents),
     h('div', { class: 'strobe-frame' }, strobeCanvas),
-    h('div', { class: 'bar-legend' }, h('span', null, '← flat drifts left'), h('span', null, 'still = in tune'), h('span', null, 'sharp drifts right →')),
+    h('div', { class: 'bar-legend' }, h('span', null, '← flat turns left'), h('span', null, 'still = in tune'), h('span', null, 'sharp turns right →')),
+    h('small', { class: 'muted' }, 'Rows: fundamental, 2nd partial, 4th partial.'),
+    strobeMotion,
   );
-  const strobePhases = [0, 0, 0];
-  let strobeLast = 0;
-  function drawStrobe(cents: number | null, now: number) {
-    const dt = strobeLast ? Math.min(0.1, (now - strobeLast) / 1000) : 0;
-    strobeLast = now;
+  let strobePhases: StrobeRow[] = STROBE_PARTIALS.map(() => ({ phase: 0, strength: 0 }));
+  /**
+   * Band phase comes from the signal itself (see core/strobe), so each row
+   * turns at its own partial's offset from the target. With reduced motion the
+   * bands stand still, shifted in proportion to the needle's cents.
+   */
+  function drawStrobe(rows: StrobeRow[] | null, cents: number | null) {
     const ctx = fitCanvas(strobeCanvas);
     const w = strobeCanvas.clientWidth;
     const hh = strobeCanvas.clientHeight;
     ctx.clearRect(0, 0, w, hh);
-    const rows = 3;
-    const rowH = hh / rows;
+    const reduced = !!reducedMotion?.matches;
+    strobeMotion.hidden = !reduced;
+    if (rows) strobePhases = rows;
+    const n = STROBE_PARTIALS.length;
+    const rowH = hh / n;
     const tol = getSettings().tolerance;
     const color = cents === null ? cssVar('--surface-3') : Math.abs(cents) <= tol ? cssVar('--good') : cents > 0 ? cssVar('--sharp') : cssVar('--flat');
-    for (let r = 0; r < rows; r++) {
-      // Each row shows a higher partial: it moves 2x and 4x faster, like a multi-band strobe.
-      if (cents !== null) strobePhases[r] = advanceStrobe(strobePhases[r], cents * Math.pow(2, r), dt, 0.12);
-      const bandW = w / (8 * Math.pow(2, r));
-      const offset = strobePhases[r] * bandW * 2;
+    for (let r = 0; r < n; r++) {
+      const bandW = w / (8 * STROBE_PARTIALS[r]);
+      const phase = reduced ? (cents === null ? 0 : (Math.max(-range, Math.min(range, cents)) / range) * 0.5) : strobePhases[r].phase;
+      const offset = (((phase % 1) + 1) % 1) * bandW * 2;
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.85 - r * 0.2;
+      // Faint rows mean that partial is weak or missing in the sound.
+      ctx.globalAlpha = r === 0 || reduced ? 0.85 : 0.2 + 0.65 * Math.min(1, strobePhases[r].strength * 2);
       for (let x = -bandW * 2 + offset; x < w + bandW; x += bandW * 2) {
         ctx.fillRect(x, r * rowH + 3, bandW, rowH - 6);
       }
@@ -339,6 +431,7 @@ export function mountTuner(root: HTMLElement) {
   const noticeSlot = h('div');
   const clickNotice = h('p', { class: 'mic-warning', role: 'note', hidden: true }, 'Metronome not heard by mic, reading continuously.');
   const refBadge = h('span', { class: 'ref-badge', hidden: true }, 'Reference playing');
+  const agoEl = h('span', { class: 'ago', hidden: true });
   let suggested: number | null = null;
   const suggestChip = h('button', {
     class: 'chip',
@@ -683,6 +776,10 @@ export function mountTuner(root: HTMLElement) {
     try {
       await tracker.start();
       if (!tracker.running) return;
+      shownAt = null;
+      clearStale();
+      phaseStrobe.reset();
+      strobeFrameTime = null;
       timer.start();
       root.querySelector('.tuner')?.classList.add('listening');
       startBtn.textContent = 'Stop';
@@ -838,17 +935,45 @@ export function mountTuner(root: HTMLElement) {
       }
     }
     followNote(note && !held ? note.midi : null, f.time);
-    if (s.tunerDisplay === 'strobe') drawStrobe(cents, nowMs);
+    if (s.tunerDisplay === 'strobe') {
+      const estimate = strobeFrameTime === null ? 0 : (f.time - strobeFrameTime) * f.sampleRate;
+      strobeFrameTime = f.time;
+      // Clicks and held frames would disturb the phase; the clock still advances.
+      drawStrobe(phaseStrobe.update(f.samples, f.sampleRate, cents !== null && !f.gated && !held ? target : null, estimate), cents);
+    } else {
+      strobeFrameTime = null;
+    }
     history.push({ t: f.time, cents });
     while (history.length && f.time - history[0].t > HISTORY_SECONDS) history.shift();
 
     // Hysteresis keeps the in-tune state from flickering at the edge of the range.
     const { inTune, hold, fire } = transient ? { inTune: false, hold: 0, fire: false } : inTuneLatch.update(cents, displayMidi, nowMs / 1000, s.tolerance);
-    if (fire) haptic(12);
+    if (fire) {
+      haptic(12);
+      if (s.lockChime) {
+        void ensureRunning().then((ctx) => {
+          const when = ctx.currentTime + 0.01;
+          selfSounds.add(when, playChime(ctx, getMaster(), when));
+        });
+      }
+    }
+    range = s.tunerScale === 'auto' ? autoScale.update(cents, nowMs / 1000) : scaleRange(s.tunerScale);
+    renderBarScale();
+    placeBarZone(s.tolerance);
     sonify(s.sonify && tracker.running ? cents : null, s.tolerance);
 
     if (displayMidi === null || cents === null) {
-      ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats);
+      if (s.keepLastNote && shownAt !== null) {
+        // Leave the last reading up, greyed, with its age.
+        root.querySelector('.tuner')?.classList.add('stale');
+        agoEl.hidden = false;
+        const ago = agoText((nowMs - shownAt) / 1000);
+        if (agoEl.textContent !== ago) agoEl.textContent = ago;
+        drawTrace();
+        return;
+      }
+      clearStale();
+      ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats, range);
       root.querySelector('.tuner')?.classList.remove('has-note');
       barNeedle.style.left = '50%';
       drawTrace();
@@ -856,6 +981,8 @@ export function mountTuner(root: HTMLElement) {
     }
 
     root.querySelector('.tuner')?.classList.add('has-note');
+    clearStale();
+    shownAt = nowMs;
     const pretty = prettyName(noteName(displayMidi, s.flats, false));
     const accidental = pretty.match(/[♯♭]/)?.[0] ?? '';
     noteEl.textContent = pretty.replace(accidental, '');
@@ -863,17 +990,19 @@ export function mountTuner(root: HTMLElement) {
     accidentalEl.textContent = accidental;
     octaveEl.textContent = String(Math.floor(displayMidi / 12) - 1);
     // Words as well as colour, so the state reads without relying on colour vision.
-    const direction = `${Math.abs(Math.round(cents))}¢ ${cents > 0 ? 'sharp' : 'flat'}`;
-    centsEl.textContent = hint ?? (inTune ? 'in tune' : direction);
+    const decimals = useDecimalCents(s.decimalCents, s.tolerance);
+    const direction = centsText(cents, decimals);
+    // The number stays next to "in tune", so fine work can still see it.
+    centsEl.textContent = hint ?? (inTune ? `${signedCents(cents, decimals)} in tune` : direction);
     barNote.textContent = `${pretty}${Math.floor(displayMidi / 12) - 1}`;
-    barCents.textContent = hint ?? (inTune ? `${formatCents(cents)} in tune` : direction);
+    barCents.textContent = hint ?? (inTune ? `${signedCents(cents, decimals)} in tune` : direction);
     if (!held) announce(`${pretty.replace('♯', ' sharp').replace('♭', ' flat')}, ${hint ?? (inTune ? 'in tune' : direction.replace('¢', ' cents'))}`);
     strobeNote.textContent = barNote.textContent;
     strobeCents.textContent = barCents.textContent;
-    barNeedle.style.left = `${50 + Math.max(-50, Math.min(50, cents))}%`;
+    barNeedle.style.left = `${centsToPercent(cents, range)}%`;
     barMeter.classList.toggle('good', inTune);
 
-    ring.update({ pitchClass: ((displayMidi % 12) + 12) % 12, cents, inTune, hold }, s.tolerance, s.flats);
+    ring.update({ pitchClass: ((displayMidi % 12) + 12) % 12, cents, inTune, hold }, s.tolerance, s.flats, range);
     const stage = root.querySelector('.tuner');
     stage?.classList.toggle('in-tune', inTune);
     stage?.classList.toggle('sharp', !inTune && cents > 0);
@@ -883,12 +1012,24 @@ export function mountTuner(root: HTMLElement) {
       refBtn.disabled = false;
     }
     freqEl.replaceChildren(
-      h('span', null, h('b', null, f.frequency!.toFixed(1)), ' Hz'),
+      h('span', null, h('b', null, formatHz(f.frequency!)), ' Hz'),
       h('span', { class: 'sep' }),
-      h('span', null, 'target ', h('b', null, target.toFixed(1)), ' Hz'),
+      h('span', null, 'target ', h('b', null, formatHz(target)), ' Hz'),
     );
     drawTrace();
   });
+
+  function clearStale() {
+    root.querySelector('.tuner')?.classList.remove('stale');
+    agoEl.hidden = true;
+  }
+
+  function placeBarZone(tolerance: number) {
+    const left = `${centsToPercent(-tolerance, range)}%`;
+    const width = `${centsToPercent(tolerance, range) - centsToPercent(-tolerance, range)}%`;
+    if (barZone.style.left !== left) barZone.style.left = left;
+    if (barZone.style.width !== width) barZone.style.width = width;
+  }
 
   function drawTrace() {
     const ctx = fitCanvas(trace);
@@ -896,7 +1037,7 @@ export function mountTuner(root: HTMLElement) {
     const hh = trace.clientHeight;
     ctx.clearRect(0, 0, w, hh);
     const tol = getSettings().tolerance;
-    const y = (c: number) => hh / 2 - (c / 50) * (hh / 2 - 4);
+    const y = (c: number) => centsToY(c, range, hh);
     ctx.fillStyle = cssVar('--good-soft');
     ctx.fillRect(0, y(Math.max(tol, 1)), w, y(-Math.max(tol, 1)) - y(Math.max(tol, 1)));
     if (performance.now() - traceTextAt > 1000) {
@@ -918,7 +1059,7 @@ export function mountTuner(root: HTMLElement) {
         prev = null;
         continue;
       }
-      const c = Math.max(-50, Math.min(50, p.cents));
+      const c = Math.max(-range, Math.min(range, p.cents));
       const yy = y(c);
       if (prev) {
         ctx.strokeStyle = Math.abs(c) <= tol ? good : c > 0 ? sharp : flat;
@@ -960,7 +1101,7 @@ export function mountTuner(root: HTMLElement) {
     stringsPanel,
     display,
     h('div', { class: 'level-row' }, h('div', { class: 'level', role: 'meter', 'aria-label': 'Input level' }, levelFill, levelTick), clipLight, levelStatus),
-    h('div', { class: 'meta-row' }, startBtn, freqEl, refBadge, refBtn),
+    h('div', { class: 'meta-row' }, startBtn, freqEl, agoEl, refBadge, refBtn),
     errorSlot,
     noticeSlot,
     clickNotice,
@@ -983,8 +1124,12 @@ export function mountTuner(root: HTMLElement) {
     stringsPanel.hidden = s.tunerMode !== 'strings';
     modeSeg.set(s.tunerMode);
     displaySeg.set(s.tunerDisplay);
-    barZone.style.left = `${50 - s.tolerance}%`;
-    barZone.style.width = `${s.tolerance * 2}%`;
+    inTuneLatch.setHoldSeconds(s.tunerHoldSeconds);
+    if (s.tunerScale !== 'auto') range = scaleRange(s.tunerScale);
+    else if (!tracker.running) range = autoScale.range;
+    renderBarScale();
+    placeBarZone(s.tolerance);
+    if (!s.keepLastNote) clearStale();
     const tuningsKey = s.customTunings.map((x) => `${x.id}:${x.label}`).join('|');
     if (instrumentSelect.dataset.key !== tuningsKey) {
       instrumentSelect.dataset.key = tuningsKey;
@@ -994,11 +1139,11 @@ export function mountTuner(root: HTMLElement) {
     editChip.textContent = s.stringInstrument.startsWith(CUSTOM_TUNING_PREFIX) ? 'Edit tuning' : 'New tuning';
     if (s.tunerMode === 'strings') renderStrings(manualString, null);
     // Only reset the display when idle; settings also change while tuning (e.g. saving tendencies).
-    if (!tracker.running) ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats);
+    if (!tracker.running && !root.querySelector('.tuner.stale')) ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats, range);
     tendPanel.hidden = s.tunerMode !== 'chromatic';
     renderTendencies();
     drawTrace();
-    if (s.tunerDisplay === 'strobe') drawStrobe(null, performance.now());
+    if (s.tunerDisplay === 'strobe') drawStrobe(null, null);
   }
   applySettings();
   const offSettings = subscribeSettings(applySettings);

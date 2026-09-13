@@ -203,6 +203,82 @@ await check('tuner pauses in the background and shows a threshold on the level m
   return out.resumed ? 'paused, then resumed' : 'paused, waiting for a tap';
 });
 
+await check('tuner: fine range shows decimal cents on a ±10 scale and keeps the last note', async () => {
+  await open('tuner');
+  const setPrefs = (p) => run(`const k = 'partial.settings.v1'; const s = JSON.parse(localStorage.getItem(k) || '{}'); Object.assign(s, ${JSON.stringify(p)}); localStorage.setItem(k, JSON.stringify(s));`);
+  await setPrefs({ tolerance: 1, tunerScale: '10', keepLastNote: true, tunerDisplay: 'ring' });
+  try {
+    await open('tuner');
+    const out = await run(`${FAKE_MIC} window.__fake.o.frequency.value = 440 * Math.pow(2, 3/1200); document.querySelector('.tuner-stage').click(); await wait(2500);
+      const cents = document.querySelector('.big-cents').textContent;
+      const labels = [...document.querySelectorAll('.bar-scale span')].map((s) => s.textContent);
+      const ringLabels = [...document.querySelectorAll('.ring-scale text')].map((s) => s.textContent);
+      window.__fake.o.disconnect(); await wait(2600);
+      const stale = !!document.querySelector('.tuner.stale');
+      const ago = document.querySelector('.ago').textContent;
+      const kept = document.querySelector('.note-line').textContent;
+      document.querySelector('.tuner-toggle').click();
+      return { cents, labels, ringLabels, stale, ago, kept };`);
+    assert(/^\d+\.\d¢ sharp$/.test(out.cents), `cents readout ${out.cents}`);
+    assert(Math.abs(parseFloat(out.cents) - 3) <= 1.5, `cents value ${out.cents}`);
+    assert(out.labels.join(' ') === '−10 −5 0 +5 +10', `bar labels ${out.labels}`);
+    assert(out.ringLabels.join(' ') === '−10 −5 +5 +10', `ring labels ${out.ringLabels}`);
+    assert(out.stale && /^[12] s ago$/.test(out.ago) && out.kept.startsWith('A4'), `kept note: ${JSON.stringify(out)}`);
+    return `${out.cents}, kept ${out.kept} ${out.ago}`;
+  } finally {
+    await setPrefs({ tolerance: 5, tunerScale: '50', keepLastNote: false });
+  }
+});
+
+const strobeMotion = async () => {
+  await open('tuner');
+  const out = await run(`${FAKE_MIC}
+    [...document.querySelectorAll('.seg-btn')].find((b) => b.dataset.value === 'strobe').click();
+    const canvas = document.querySelector('.strobe-canvas');
+    // Left edge of the first band on the top row, in CSS pixels, modulo one band period.
+    const edge = () => {
+      const ctx = canvas.getContext('2d'); const dpr = canvas.width / canvas.clientWidth;
+      const y = Math.round((canvas.clientHeight / 6) * dpr);
+      const row = ctx.getImageData(0, y, canvas.width, 1).data;
+      for (let x = 1; x < canvas.width; x++) if (row[x * 4 + 3] > 127 && row[(x - 1) * 4 + 3] <= 127) return (x / dpr) % (canvas.clientWidth / 4);
+      return null;
+    };
+    const spread = async () => {
+      const xs = []; for (let i = 0; i < 12; i++) { await wait(120); xs.push(edge()); }
+      const period = canvas.clientWidth / 4; let moved = 0;
+      for (let i = 1; i < xs.length; i++) { let d = Math.abs(xs[i] - xs[i - 1]); d = Math.min(d, period - d); moved += d; }
+      return moved;
+    };
+    window.__fake.o.frequency.value = 440; document.querySelector('.tuner-stage').click(); await wait(2000);
+    const still = await spread();
+    window.__fake.o.frequency.value = 440 * Math.pow(2, 2/1200); await wait(1500);
+    const sharp = await spread();
+    document.querySelector('.tuner-toggle').click();
+    [...document.querySelectorAll('.seg-btn')].find((b) => b.dataset.value === 'ring').click();
+    const note = [...document.querySelectorAll('.strobe-view small')].some((s) => !s.hidden && /Motion reduced/.test(s.textContent));
+    return { still, sharp, note };`);
+  return out;
+};
+
+await check('strobe stands still in tune and turns when sharp', async () => {
+  const out = await strobeMotion();
+  assert(out.still < 6, `in-tune bands moved ${out.still.toFixed(1)} px`);
+  assert(out.sharp > 20, `sharp bands moved only ${out.sharp.toFixed(1)} px`);
+  assert(!out.note, 'reduced motion note shown without the preference');
+  return `moved ${out.still.toFixed(1)} px in tune, ${out.sharp.toFixed(1)} px at 2 cents sharp`;
+});
+
+await check('strobe bands stay still with reduced motion', async () => {
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  try {
+    const out = await strobeMotion();
+    assert(out.sharp < 6 && out.note, `reduced motion: ${JSON.stringify(out)}`);
+    return `moved ${out.sharp.toFixed(1)} px at 2 cents sharp, note shown`;
+  } finally {
+    await send('Emulation.setEmulatedMedia', { features: [] });
+  }
+});
+
 await check('tuner strings fit one row at 320 px, with labels and a pressed Start button', async () => {
   await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 700, deviceScaleFactor: 1, mobile: true });
   try {

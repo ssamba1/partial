@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addReading, advanceStrobe, analyzeTake, segmentNotes, summarize } from '../src/core/intonation';
+import { addReading, analyzeTake, segmentNotes, summarize } from '../src/core/intonation';
 import { beatNoise, isBarMuted, isBeatRandomlyMuted, polyOffsets, tempoMarking } from '../src/core/rhythm';
 
 describe('gap trainer and random muting', () => {
@@ -42,16 +42,6 @@ describe('tempo markings', () => {
     expect(tempoMarking(100)).toBe('Andante');
     expect(tempoMarking(130)).toBe('Allegro');
     expect(tempoMarking(390)).toBe('Prestissimo');
-  });
-});
-
-describe('strobe', () => {
-  it('stands still in tune and drifts by direction', () => {
-    expect(advanceStrobe(0.3, 0, 1)).toBeCloseTo(0.3, 12);
-    // Short step so the phase does not wrap around.
-    expect(advanceStrobe(0.3, 5, 0.1)).toBeGreaterThan(0.3);
-    expect(advanceStrobe(0.3, -5, 0.1)).toBeLessThan(0.3);
-    expect(advanceStrobe(0.95, 10, 1)).toBeLessThan(1);
   });
 });
 
