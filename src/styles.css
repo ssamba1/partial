@@ -1313,6 +1313,32 @@ input.a4-value {
   --state-soft: var(--flat-soft);
 }
 
+/* Narrow: one column, strings above the ring. Wide: ring and readout left, strings, trace and tendencies right. */
+.tuner-cols {
+  display: flex;
+  flex-direction: column;
+}
+.tuner-main,
+.tuner-side {
+  display: contents;
+}
+.tuner-side > .strings-panel {
+  order: -1;
+}
+@media (min-width: 900px) {
+  .tuner-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 28px;
+    align-items: start;
+  }
+  .tuner-main,
+  .tuner-side {
+    display: block;
+    min-width: 0;
+  }
+}
+
 .tuner-stage {
   display: block;
   width: 100%;

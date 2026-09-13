@@ -1,7 +1,7 @@
 import type { NoteReading, TuningSystem } from '../core/notes';
 import { channelIndex, peakAbs, type MicChannel } from '../core/mic';
-import { acRms, detectPitchAdaptive, frameSizeFor } from '../core/pitch';
-import { ReadingSmoother, SMOOTHING, type Damping } from '../core/tracking';
+import { acRms, frameSizeFor } from '../core/pitch';
+import { createFrameState, processFrame, SMOOTHING, type Damping, type FrameState } from '../core/tracking';
 import { acquireMic, ensureRunning, releaseMic } from './context';
 
 export type { Damping } from '../core/tracking';
@@ -43,6 +43,8 @@ export interface TrackerOptions {
   channel?: () => MicChannel;
   /** Lowest pitch expected from the instrument, to place the rumble filter below it. */
   lowestFrequency?: () => number;
+  /** Pitch range to search, narrower than the default for an instrument with a known range. */
+  frequencyRange?: () => { min: number; max: number } | null;
 }
 
 /**
@@ -57,10 +59,8 @@ export class PitchTracker {
   private highpassHz = 0;
   private raf = 0;
   private buffer = new Float32Array(4096);
-  private smoothing = new ReadingSmoother();
+  private state: FrameState = createFrameState();
   private listeners = new Set<(f: TrackerFrame) => void>();
-  private last: { note: NoteReading; frequency: number; clarity: number; displayCents: number; displayFrequency: number | null; at: number } | null = null;
-  private frameCount = 0;
   running = false;
 
   constructor(private opts: TrackerOptions) {}
@@ -126,53 +126,25 @@ export class PitchTracker {
     this.nodes.push(this.highpass, lowpass);
 
     this.running = true;
-    this.smoothing.reset();
-    this.last = null;
+    this.state = createFrameState();
 
     const loop = () => {
       if (!this.running || !this.analyser) return;
-      const profile = SMOOTHING[this.opts.damping?.() ?? 'normal'];
       this.setHighpass();
       this.analyser.getFloatTimeDomainData(this.buffer);
-      const now = performance.now();
       const level = acRms(this.buffer);
       const gated = this.opts.gate?.(ctx.currentTime, this.buffer.length / ctx.sampleRate, level) ?? false;
-
-      let note: NoteReading | null = null;
-      let frequency: number | null = null;
-      let clarity = 0;
-      let displayCents = 0;
-      let displayFrequency: number | null = null;
-      let held = false;
-
-      // With no pitch present (room noise), analyse every other frame to save battery; a new note is still caught within ~33 ms.
-      this.frameCount++;
-      const idle = !this.last && this.frameCount % 2 === 1;
-
-      if (!gated && !idle) {
-        const result = detectPitchAdaptive(this.buffer, {
-          sampleRate: ctx.sampleRate,
-          minFrequency: MIN_FREQUENCY,
-          minRms: this.opts.sensitivity?.() ?? 0.008,
-        });
-        const smoothed = this.smoothing.push(result?.frequency ?? null, now, profile, this.opts.tuning());
-        if (smoothed.note && smoothed.frequency) {
-          note = smoothed.note;
-          frequency = smoothed.frequency;
-          displayCents = smoothed.displayCents;
-          displayFrequency = smoothed.displayFrequency;
-          clarity = result?.clarity ?? 0;
-          this.last = { note: smoothed.note, frequency: smoothed.frequency, clarity, displayCents, displayFrequency, at: now };
-        }
-      }
-
-      // Hold the last reading briefly through dropouts and gated frames, so the display doesn't flicker.
-      if (!note && this.last && now - this.last.at < profile.holdMs) {
-        ({ note, frequency, clarity, displayCents, displayFrequency } = this.last);
-        held = true;
-      } else if (!note) {
-        this.last = null;
-      }
+      const range = this.opts.frequencyRange?.();
+      const r = processFrame(this.state, this.buffer, performance.now(), {
+        sampleRate: ctx.sampleRate,
+        tuning: this.opts.tuning(),
+        profile: SMOOTHING[this.opts.damping?.() ?? 'normal'],
+        minRms: this.opts.sensitivity?.() ?? 0.008,
+        minFrequency: Math.max(MIN_FREQUENCY, range?.min ?? MIN_FREQUENCY),
+        maxFrequency: range?.max,
+        gated,
+        level,
+      });
 
       const frame: TrackerFrame = {
         time: ctx.currentTime,
@@ -180,12 +152,12 @@ export class PitchTracker {
         sampleRate: ctx.sampleRate,
         level,
         peak: peakAbs(this.buffer),
-        frequency,
-        clarity,
-        note,
-        displayCents: note ? displayCents : 0,
-        displayFrequency: note ? displayFrequency : null,
-        held,
+        frequency: r.frequency,
+        clarity: r.clarity,
+        note: r.note,
+        displayCents: r.displayCents,
+        displayFrequency: r.displayFrequency,
+        held: r.held,
         gated,
       };
       this.listeners.forEach((fn) => fn(frame));

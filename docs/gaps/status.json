@@ -695,8 +695,8 @@
   "id": "01-33",
   "file": "gaps/01-tuner.md",
   "title": "Common instruments and tunings are missing",
-  "status": "blocked",
-  "note": "Needs a verified list of instrument tunings from a primary source; custom tunings and scrolling strings already support them"
+  "status": "fixed",
+  "note": "Added 19 instruments (7 and 8 string guitar, 12-string, 6-string bass, ukulele variants, tenor and Irish banjo, mandola, octave mandolin, bouzoukis, oud, erhu, viols, solo bass, 34-string lever harp) with maker or reference URLs; sitar left out as unverified"
  },
  {
   "id": "01-34",
@@ -1176,37 +1176,43 @@
   "id": "01-105",
   "file": "gaps/01-tuner.md",
   "title": "Strings mode detection range is not narrowed to the instrument",
-  "status": "open"
+  "status": "fixed",
+  "note": "Strings mode limits the search to 0.7x lowest to 1.5x highest string, so a bass low E with strong harmonics reads correctly"
  },
  {
   "id": "01-106",
   "file": "gaps/01-tuner.md",
   "title": "\"Hear target\" can play a target from the previous tuning",
-  "status": "open"
+  "status": "fixed",
+  "note": "Hear target stores what the target is (note, string, partial) and recomputes its frequency from the current tuning when pressed"
  },
  {
   "id": "01-107",
   "file": "gaps/01-tuner.md",
   "title": "Recorder report and live tuner disagree by design",
-  "status": "open"
+  "status": "fixed",
+  "note": "Recorder analysis now runs the same processFrame path (smoothing, hold, sensitivity) as the live tuner"
  },
  {
   "id": "01-108",
   "file": "gaps/01-tuner.md",
   "title": "Idle frame skipping delays note starts",
-  "status": "open"
+  "status": "fixed",
+  "note": "Removed idle every-other-frame skipping; the first loud frame is analysed (unit test)"
  },
  {
   "id": "01-109",
   "file": "gaps/01-tuner.md",
   "title": "Tracker logic is untested and response time is unmeasured",
-  "status": "open"
+  "status": "fixed",
+  "note": "processFrame is unit tested (hold, gating, onset, frame-rate independence); e2e measures step settle within 2 cents (about 100 ms headless)"
  },
  {
   "id": "01-110",
   "file": "gaps/01-tuner.md",
   "title": "No wide-screen layout",
-  "status": "open"
+  "status": "fixed",
+  "note": "Two-column tuner layout at 900 px and wider, with e2e check at 1280 px"
  },
  {
   "id": "02-1",

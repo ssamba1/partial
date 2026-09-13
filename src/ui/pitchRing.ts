@@ -24,7 +24,7 @@ function arcPath(r: number, fromDeg: number, toDeg: number): string {
 }
 
 export interface RingReading {
-  /** Pitch class to highlight on the outer ring (already transposed for display). */
+  /** Slot to highlight on the outer ring: the pitch class (already transposed for display), or the step of a non-12 tuning. */
   pitchClass: number | null;
   cents: number;
   inTune: boolean;
@@ -41,12 +41,17 @@ export interface PitchRing {
   setFixed: (fixed: boolean) => void;
   /** Small text under each pitch class label (index = pitch class), or empty strings for none. */
   setOffsets: (texts: string[]) => void;
+  /** Names of the slots for a tuning with other than 12 notes, or null for the 12 note names. */
+  setDivisions: (names: string[] | null) => void;
+  /** Called with the slot tapped or long-pressed, for note lock and hearing a note. */
+  onNote: (fn: (slot: number, long: boolean) => void) => void;
 }
 
 /**
- * Chromatic ring tuner. Outer ring: the 12 pitch classes, current one lit.
- * Inner arc: deviation from the top (in tune) sweeping clockwise when sharp,
- * counter-clockwise when flat. Innermost ring fills while you hold the note in tune.
+ * Chromatic ring tuner. Outer ring: the pitch classes (12, or the steps of
+ * another equal division), current one lit. Inner arc: deviation from the top
+ * (in tune) sweeping clockwise when sharp, counter-clockwise when flat.
+ * Innermost ring fills while you hold the note in tune.
  */
 export function createPitchRing(): PitchRing {
   const svg = svgEl('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'ring-svg', 'aria-hidden': 'true' });
@@ -103,25 +108,60 @@ export function createPitchRing(): PitchRing {
 
   const notes = svgEl('g', { class: 'ring-notes' });
   /** Label groups (name plus optional offset), counter-rotated so they stay upright. */
-  const labels: SVGGElement[] = [];
-  const names: SVGTextElement[] = [];
-  const offsets: SVGTextElement[] = [];
-  const dots: SVGCircleElement[] = [];
-  // Place pitch classes like a clock with the detected note rotated to the top.
-  for (let pc = 0; pc < 12; pc++) {
-    const g = svgEl('g', { class: 'ring-note' });
-    const dot = svgEl('circle', { r: 20, class: 'note-dot' });
-    const text = svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'note-label' });
-    const offset = svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'note-offset' });
-    const textGroup = svgEl('g', { class: 'note-text' });
-    textGroup.append(text, offset);
-    g.append(dot, textGroup);
-    notes.append(g);
-    labels.push(textGroup);
-    names.push(text);
-    offsets.push(offset);
-    dots.push(dot);
-  }
+  let labels: SVGGElement[] = [];
+  let names: SVGTextElement[] = [];
+  let offsets: SVGTextElement[] = [];
+  let dots: SVGCircleElement[] = [];
+  let divisions = 12;
+  let customNames: string[] | null = null;
+  const step = () => 360 / divisions;
+  let noteHandler: ((slot: number, long: boolean) => void) | null = null;
+
+  const buildSlots = () => {
+    notes.replaceChildren();
+    labels = [];
+    names = [];
+    offsets = [];
+    dots = [];
+    // Smaller dots when the ring holds more than 12 notes.
+    const r = divisions > 12 ? Math.max(8, Math.round((20 * 12) / divisions)) : 20;
+    for (let pc = 0; pc < divisions; pc++) {
+      const g = svgEl('g', { class: 'ring-note' });
+      const dot = svgEl('circle', { r, class: 'note-dot' });
+      const text = svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'note-label' });
+      const offset = svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'note-offset' });
+      const textGroup = svgEl('g', { class: 'note-text' });
+      textGroup.append(text, offset);
+      g.append(dot, textGroup);
+      // Tap a note to lock the tuner to it; hold to hear it.
+      let pressTimer = 0;
+      let longFired = false;
+      g.addEventListener('pointerdown', (e) => {
+        if (!noteHandler) return;
+        e.stopPropagation();
+        longFired = false;
+        pressTimer = window.setTimeout(() => {
+          longFired = true;
+          noteHandler?.(pc, true);
+        }, 550);
+      });
+      const cancel = () => window.clearTimeout(pressTimer);
+      g.addEventListener('pointerup', cancel);
+      g.addEventListener('pointerleave', cancel);
+      g.addEventListener('pointercancel', cancel);
+      g.addEventListener('click', (e) => {
+        if (!noteHandler) return;
+        e.stopPropagation();
+        if (!longFired) noteHandler(pc, false);
+      });
+      notes.append(g);
+      labels.push(textGroup);
+      names.push(text);
+      offsets.push(offset);
+      dots.push(dot);
+    }
+  };
+  buildSlots();
   const notesRotor = svgEl('g', { class: 'ring-notes-rotor' });
   notesRotor.append(notes);
   svg.append(notesRotor);
@@ -142,25 +182,27 @@ export function createPitchRing(): PitchRing {
   let holdKey = '';
 
   const layoutNotes = (flats: boolean) => {
-    for (let pc = 0; pc < 12; pc++) {
-      const [x, y] = polar(NOTE_R, pc * 30);
+    for (let pc = 0; pc < divisions; pc++) {
+      const [x, y] = polar(NOTE_R, pc * step());
       dots[pc].setAttribute('cx', String(x));
       dots[pc].setAttribute('cy', String(y));
       names[pc].setAttribute('x', String(x));
       names[pc].setAttribute('y', String(y - (offsetsOn ? 5 : 0)));
       offsets[pc].setAttribute('x', String(x));
       offsets[pc].setAttribute('y', String(y + 8));
-      const name = prettyName(noteName(pc, flats, false));
+      const name = customNames ? customNames[pc] : prettyName(noteName(pc, flats, false));
       names[pc].textContent = name;
       names[pc].classList.toggle('long', name.length > 2);
+      labels[pc].style.transform = `rotate(${-rotation}deg)`;
     }
+    el.classList.toggle('many-notes', divisions > 12);
   };
   let lastKey = '';
 
   const update = (r: RingReading, tolerance: number, flats: boolean, range = 50) => {
     drawScale(range);
     el.dataset.range = String(range);
-    const key = `${flats}|${noteName(0, flats, false)}`;
+    const key = `${flats}|${noteName(0, flats, false)}|${noteName(1, flats, false)}|${divisions}|${customNames?.join(',') ?? ''}`;
     if (key !== lastKey) {
       layoutNotes(flats);
       lastKey = key;
@@ -172,9 +214,10 @@ export function createPitchRing(): PitchRing {
       zone.setAttribute('d', arcPath(ARC_R, -tol, tol));
     }
 
-    if (r.pitchClass !== null && r.pitchClass !== lastPc) {
+    const slot = r.pitchClass !== null && r.pitchClass < divisions ? r.pitchClass : null;
+    if (slot !== null && slot !== lastPc) {
       // Rotate the shortest way so the detected note sits at the top.
-      const target = fixed ? 0 : -r.pitchClass * 30;
+      const target = fixed ? 0 : -slot * step();
       let delta = (target - rotation) % 360;
       if (delta > 180) delta -= 360;
       if (delta < -180) delta += 360;
@@ -187,17 +230,16 @@ export function createPitchRing(): PitchRing {
         notesRotor.style.transform = `rotate(${rotation}deg)`;
         // Counter-rotate labels with the same transition so they stay upright while the rotor turns.
         labels.forEach((l) => (l.style.transform = `rotate(${-rotation}deg)`));
-        offsets.forEach((l) => (l.style.transform = `rotate(${-rotation}deg)`));
       }
-      lastPc = r.pitchClass;
+      lastPc = slot;
     }
-    if (r.pitchClass !== activePc) {
-      if (activePc !== null && activePc >= 0) dots[activePc].parentElement!.classList.remove('active');
-      if (r.pitchClass !== null) dots[r.pitchClass].parentElement!.classList.add('active');
-      activePc = r.pitchClass;
+    if (slot !== activePc) {
+      if (activePc !== null && activePc >= 0) dots[activePc]?.parentElement!.classList.remove('active');
+      if (slot !== null) dots[slot].parentElement!.classList.add('active');
+      activePc = slot;
     }
 
-    const active = r.pitchClass !== null;
+    const active = slot !== null;
     const state = !active ? 'idle' : r.inTune ? 'in-tune' : r.cents > 0 ? 'sharp' : r.cents < 0 ? 'flat' : '';
     const sk = `${state}|${active && r.hold >= 1}`;
     if (sk !== stateKey) {
@@ -236,23 +278,45 @@ export function createPitchRing(): PitchRing {
       rotation = 0;
       notesRotor.style.transform = 'rotate(0deg)';
       labels.forEach((l) => (l.style.transform = 'rotate(0deg)'));
-      offsets.forEach((l) => (l.style.transform = 'rotate(0deg)'));
     }
   };
 
   /** Small text under each pitch class label, such as the temperament's offset from equal. Empty strings hide it. */
   const setOffsets = (texts: string[]) => {
-    const any = texts.some((t) => t);
-    for (let pc = 0; pc < 12; pc++) {
-      const t = texts[pc] ?? '';
+    const any = divisions === 12 && texts.some((t) => t);
+    for (let pc = 0; pc < divisions; pc++) {
+      const t = any ? (texts[pc] ?? '') : '';
       if (offsets[pc].textContent !== t) offsets[pc].textContent = t;
       // Lift the name to make room for the offset under it.
-      const y = String(polar(NOTE_R, pc * 30)[1] - (any ? 5 : 0));
+      const y = String(polar(NOTE_R, pc * step())[1] - (any ? 5 : 0));
       if (names[pc].getAttribute('y') !== y) names[pc].setAttribute('y', y);
     }
     offsetsOn = any;
     el.classList.toggle('with-offsets', any);
   };
 
-  return { el, center, update, setFixed, setOffsets };
+  const setDivisions = (list: string[] | null) => {
+    const n = list?.length ?? 12;
+    const same = n === divisions && (list?.join(',') ?? '') === (customNames?.join(',') ?? '');
+    if (same) return;
+    const rebuild = n !== divisions;
+    divisions = n;
+    customNames = list && list.length ? list : null;
+    if (rebuild) {
+      buildSlots();
+      activePc = -1;
+    }
+    lastPc = null;
+    lastKey = '';
+    if (!fixed) {
+      rotation = 0;
+      notesRotor.style.transform = 'rotate(0deg)';
+    }
+  };
+
+  const onNote = (fn: (slot: number, long: boolean) => void) => {
+    noteHandler = fn;
+  };
+
+  return { el, center, update, setFixed, setOffsets, setDivisions, onNote };
 }

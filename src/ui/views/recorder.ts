@@ -2,8 +2,10 @@ import { acquireMic, ensureRunning, getContext, MicError, releaseMic } from '../
 import { formatCents, formatDuration, uid } from '../../core/format';
 import { analyzeTake, type TakeReport } from '../../core/intonation';
 import { encodeWav, pitchShift } from '../../core/pitchshift';
-import { frequencyToNote, noteName, prettyName } from '../../core/notes';
-import { detectPitch, rms } from '../../core/pitch';
+import { noteName, prettyName } from '../../core/notes';
+import { frameSizeFor, rms } from '../../core/pitch';
+import { recordingReader, SMOOTHING } from '../../core/tracking';
+import { MIN_FREQUENCY } from '../../audio/pitchTracker';
 import { db, type RecordingEntry } from '../../store/db';
 import { getSettings, logPractice, tuningOf } from '../../store/settings';
 import { iconButton, segmented, toast } from '../components';
@@ -321,17 +323,12 @@ export function mountRecorder(root: HTMLElement) {
         const tol = getSettings().tolerance;
         // Yield to the browser before the heavy loop so the spinner paints.
         await new Promise((r) => setTimeout(r, 30));
-        const report = analyzeTake(
-          samples,
-          buffer.sampleRate,
-          (frame) => {
-            const p = detectPitch(frame, { sampleRate: buffer.sampleRate, minRms: getSettings().sensitivity });
-            if (!p) return null;
-            const n = frequencyToNote(p.frequency, tuning);
-            return { midi: n.midi, cents: n.cents };
-          },
-          tol,
-        );
+        // The same per-frame processor and settings as the live tuner, so both give the same in-tune share.
+        const s = getSettings();
+        const frameSize = frameSizeFor(buffer.sampleRate, MIN_FREQUENCY);
+        const hop = Math.round(frameSize / 4);
+        const reader = recordingReader(buffer.sampleRate, hop, { tuning, profile: SMOOTHING[s.damping], minRms: s.sensitivity, minFrequency: MIN_FREQUENCY });
+        const report = analyzeTake(samples, buffer.sampleRate, reader, tol, frameSize, hop);
         analysisSlot.replaceChildren(reportView(report, buffer.duration, tol));
       } catch (err) {
         analysisSlot.replaceChildren(errorBox(`Could not analyse this take: ${(err as Error).message}`));

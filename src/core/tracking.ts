@@ -1,5 +1,5 @@
 import { frequencyToNote, readingForNote, type NoteReading, type TuningSystem } from './notes';
-import { PitchSmoother } from './pitch';
+import { acRms, detectPitchAdaptive, PitchSmoother } from './pitch';
 
 export type Damping = 'fast' | 'normal' | 'slow';
 
@@ -129,6 +129,108 @@ export class ReadingSmoother {
     this.lastVoiced = false;
     this.lastMidi = null;
   }
+}
+
+/** A reading kept so it can be held through a short dropout. */
+interface HeldReading {
+  note: NoteReading;
+  frequency: number;
+  clarity: number;
+  displayCents: number;
+  displayFrequency: number | null;
+  at: number;
+}
+
+/** Everything the per-frame processor carries from one frame to the next. */
+export interface FrameState {
+  smoothing: ReadingSmoother;
+  last: HeldReading | null;
+}
+
+export function createFrameState(): FrameState {
+  return { smoothing: new ReadingSmoother(), last: null };
+}
+
+export interface FrameOptions {
+  sampleRate: number;
+  tuning: TuningSystem;
+  profile: SmoothingProfile;
+  /** Frames quieter than this RMS are not analysed. */
+  minRms: number;
+  minFrequency: number;
+  maxFrequency?: number;
+  /** True to skip this frame (a metronome click or the app's own cue is in it). */
+  gated?: boolean;
+  /** Level of the frame when the caller has already measured it. */
+  level?: number;
+}
+
+export interface FrameResult {
+  level: number;
+  frequency: number | null;
+  clarity: number;
+  note: NoteReading | null;
+  displayCents: number;
+  displayFrequency: number | null;
+  /** The last reading held through a dropout or a gated frame. */
+  held: boolean;
+  /** Whether pitch detection ran on this frame. */
+  analysed: boolean;
+}
+
+/**
+ * One frame of the tuner pipeline: level gate, pitch detection, smoothing and
+ * the hold through dropouts. Pure apart from `state`, so the live tuner and the
+ * recorder's take report give the same readings for the same sound.
+ */
+export function processFrame(state: FrameState, samples: Float32Array, nowMs: number, opts: FrameOptions): FrameResult {
+  const level = opts.level ?? acRms(samples);
+  let note: NoteReading | null = null;
+  let frequency: number | null = null;
+  let clarity = 0;
+  let displayCents = 0;
+  let displayFrequency: number | null = null;
+  let held = false;
+  // Quiet frames are skipped outright; anything above the gate is analysed, so a note start is never delayed.
+  const analysed = !opts.gated && level >= opts.minRms;
+
+  if (!opts.gated) {
+    const result = analysed
+      ? detectPitchAdaptive(samples, { sampleRate: opts.sampleRate, minFrequency: opts.minFrequency, maxFrequency: opts.maxFrequency, minRms: opts.minRms })
+      : null;
+    const smoothed = state.smoothing.push(result?.frequency ?? null, nowMs, opts.profile, opts.tuning);
+    if (smoothed.note && smoothed.frequency) {
+      note = smoothed.note;
+      frequency = smoothed.frequency;
+      displayCents = smoothed.displayCents;
+      displayFrequency = smoothed.displayFrequency;
+      clarity = result?.clarity ?? 0;
+      state.last = { note, frequency, clarity, displayCents, displayFrequency, at: nowMs };
+    }
+  }
+
+  // Hold the last reading briefly through dropouts and gated frames, so the display doesn't flicker.
+  if (!note && state.last && nowMs - state.last.at < opts.profile.holdMs) {
+    ({ note, frequency, clarity, displayCents, displayFrequency } = state.last);
+    held = true;
+  } else if (!note) {
+    state.last = null;
+  }
+  return { level, frequency, clarity, note, displayCents: note ? displayCents : 0, displayFrequency: note ? displayFrequency : null, held, analysed };
+}
+
+/**
+ * Reader for consecutive frames of a recording, `hop` samples apart, through
+ * the same processor as the live tuner. Held frames return null, as they are
+ * left out of the live session score.
+ */
+export function recordingReader(sampleRate: number, hop: number, opts: Omit<FrameOptions, 'sampleRate' | 'gated' | 'level'>): (frame: Float32Array) => { midi: number; cents: number } | null {
+  const state = createFrameState();
+  let n = 0;
+  return (frame) => {
+    const r = processFrame(state, frame, ((n++ * hop) / sampleRate) * 1000, { ...opts, sampleRate });
+    return r.note && !r.held ? { midi: r.note.midi, cents: r.displayCents } : null;
+  };
 }
 
 /**

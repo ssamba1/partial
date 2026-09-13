@@ -8,10 +8,11 @@ import { agoText, AutoScale, barLabels, centsText, centsToPercent, centsToY, cla
 import { PhaseStrobe, STROBE_PARTIALS, type StrobeRow } from '../../core/strobe';
 import { icon } from '../icons';
 import { formatCents, uid } from '../../core/format';
-import { allInstruments, CUSTOM_TUNING_PREFIX, sanitizeTuning, StringFollower, stringFrequency, stringMidi, suggestString, tuneHint, type StringInstrument } from '../../core/instruments';
+import { allInstruments, CUSTOM_TUNING_PREFIX, sanitizeTuning, StringFollower, stringFrequency, stringMidi, stringSearchRange, suggestString, tuneHint, type StringInstrument } from '../../core/instruments';
 import { activeFrequencies, noteOff, noteOn } from '../../audio/droneBank';
 import { FollowState, matchesReference, referenceOctaves, sonifyInterval, type ReferenceOctave } from '../../core/selfsound';
 import { OnsetGate } from '../../core/tracking';
+import { targetFrequency, type TargetSpec } from '../../core/targets';
 import { addReading, bookTendencies, InTuneLatch, LongToneWatcher, mergeTendencies, StableNoteGate, summarize, tendencyKey, traceSummary, type HeldNote, type Tendencies } from '../../core/intonation';
 import { clearTendencies, getTendencyBook, saveTendencies } from '../../store/tendencies';
 import { calibratedThreshold, meterPosition, micHelpSteps, micWarnings, SignalStatus, zeroCrossingRate } from '../../core/mic';
@@ -344,6 +345,10 @@ export function mountTuner(root: HTMLElement) {
       for (let i = 0; i < inst.strings.length; i++) lowest = Math.min(lowest, stringFrequency(inst, i, tuningOf(s), s.pureFifths));
       return lowest;
     },
+    frequencyRange: () => {
+      const s = getSettings();
+      return s.tunerMode === 'strings' ? stringSearchRange(instrument(), tuningOf(s), s.pureFifths) : null;
+    },
   });
   const voiced = new VoicedClock();
   const history: TracePoint[] = [];
@@ -477,7 +482,8 @@ export function mountTuner(root: HTMLElement) {
     setText(freqMsg, text);
   };
   const longToneEl = h('p', { class: 'long-tone', role: 'status', hidden: true });
-  let lastTarget: number | null = null;
+  /** What the last note was measured against, kept as a note rather than Hz so it follows later tuning changes. */
+  let lastTarget: TargetSpec | null = null;
   const refBtn = h(
     'button',
     {
@@ -487,7 +493,7 @@ export function mountTuner(root: HTMLElement) {
       'aria-pressed': 'false',
       onclick: () => {
         if (refSound && refSound.index === null) stopRef();
-        else if (lastTarget) void startReference(lastTarget, null);
+        else if (lastTarget) void startReference(targetFrequencyNow(lastTarget), null);
       },
     },
     icon('sound', 14),
@@ -674,6 +680,12 @@ export function mountTuner(root: HTMLElement) {
   function instrument(): StringInstrument {
     const all = allInstruments(getSettings().customTunings);
     return all.find((i) => i.id === getSettings().stringInstrument) ?? all[0];
+  }
+
+  /** A target's frequency under the tuning as it is now, not as it was when the note was read. */
+  function targetFrequencyNow(spec: TargetSpec): number {
+    const s = getSettings();
+    return targetFrequency(spec, { tuning: tuningOf(s), partialFundamental: s.partialFundamental, instrument: instrument(), pureFifths: s.pureFifths });
   }
 
   /** Editor for the player's own tunings: a copy of a built-in one, or an existing custom tuning. */
@@ -1053,6 +1065,7 @@ export function mountTuner(root: HTMLElement) {
     let target = 0;
     let hint: string | null = null;
     let partial: PartialReading | null = null;
+    let spec: TargetSpec | null = null;
 
     if (note && f.frequency) {
       if (s.tunerMode === 'partials') {
@@ -1063,6 +1076,7 @@ export function mountTuner(root: HTMLElement) {
           target = partial.target;
           cents = Math.max(-50, Math.min(50, partial.cents));
           displayMidi = transpose(s.partialFundamental + partial.semitones, semis);
+          spec = { kind: 'partial', n: partial.n };
         }
       } else if (s.tunerMode === 'strings') {
         const inst = instrument();
@@ -1081,6 +1095,7 @@ export function mountTuner(root: HTMLElement) {
         }
         cents = 1200 * Math.log2(freq / target);
         displayMidi = stringMidi(inst, index);
+        spec = { kind: 'string', index };
         renderStrings(index, cents);
         hint = tuneHint(cents);
         if (Math.abs(cents) > 50) cents = Math.sign(cents) * 50;
@@ -1088,6 +1103,7 @@ export function mountTuner(root: HTMLElement) {
         cents = f.displayCents;
         target = note.target;
         displayMidi = transpose(note.midi, semis);
+        spec = { kind: 'note', midi: note.midi };
       }
     } else if (s.tunerMode === 'strings') {
       renderStrings(manualString, null);
@@ -1195,8 +1211,8 @@ export function mountTuner(root: HTMLElement) {
     view.classList.toggle('in-tune', inTune);
     view.classList.toggle('sharp', !inTune && cents > 0);
     view.classList.toggle('flat', !inTune && cents < 0);
-    if (!held) {
-      lastTarget = target;
+    if (!held && spec) {
+      lastTarget = spec;
       refBtn.disabled = false;
     }
     freqMsg.hidden = true;
@@ -1405,17 +1421,29 @@ export function mountTuner(root: HTMLElement) {
   };
   view.append(
     h('div', { class: 'toolbar' }, modeSeg, h('div', { class: 'toolbar-end' }, displaySeg, iconButton('gear', 'Tuner options', () => openTunerOptions({ calibrate, resetTendencies })))),
-    stringsPanel,
-    partialsPanel,
-    display,
-    h('div', { class: 'level-row' }, h('div', { class: 'level', role: 'meter', 'aria-label': 'Input level' }, levelFill, levelTick), clipLight, levelStatus),
-    h('div', { class: 'meta-row' }, startBtn, freqEl, agoEl, refBadge, refBtn),
-    longToneEl,
-    errorSlot,
-    noticeSlot,
-    clickNotice,
-    h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, traceTitle, h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace, traceText),
-    tendPanel,
+    h(
+      'div',
+      { class: 'tuner-cols' },
+      h(
+        'div',
+        { class: 'tuner-main' },
+        display,
+        h('div', { class: 'level-row' }, h('div', { class: 'level', role: 'meter', 'aria-label': 'Input level' }, levelFill, levelTick), clipLight, levelStatus),
+        h('div', { class: 'meta-row' }, startBtn, freqEl, agoEl, refBadge, refBtn),
+        longToneEl,
+        errorSlot,
+        noticeSlot,
+        clickNotice,
+      ),
+      h(
+        'div',
+        { class: 'tuner-side' },
+        stringsPanel,
+        partialsPanel,
+        h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, traceTitle, h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace, traceText),
+        tendPanel,
+      ),
+    ),
   );
   root.append(view);
 

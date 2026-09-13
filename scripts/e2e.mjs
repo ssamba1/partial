@@ -170,6 +170,24 @@ await check('tuner reads a 14 cent sharp A', async () => {
   return text;
 });
 
+// 01-109: step response in the real loop. Records how long a note change takes to settle within 2 cents.
+await check('tuner settles within 2 cents after a note change, and lays out two columns when wide', async () => {
+  await open('tuner');
+  const out = await run(`${FAKE_MIC} window.__fake.o.frequency.value = 440; document.querySelector('.tuner-stage').click(); await wait(2000);
+    const t0 = performance.now(); window.__fake.o.frequency.value = 440 * Math.pow(2, 3/12);
+    let ms = -1;
+    while (performance.now() - t0 < 3000) {
+      const note = document.querySelector('.note-line').textContent; const c = Number(document.querySelector('.big-cents').textContent.match(/(\\d+(?:\\.\\d+)?)/)?.[1] ?? 99);
+      if (note.startsWith('C5') && c <= 2) { ms = Math.round(performance.now() - t0); break; }
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    const a = document.querySelector('.tuner-main').getBoundingClientRect(); const b = document.querySelector('.tuner-side').getBoundingClientRect();
+    return { ms, twoCols: b.left >= a.right - 1 };`);
+  assert(out.ms >= 0 && out.ms < 1500, `settle time ${out.ms} ms`);
+  assert(out.twoCols, 'tuner is not in two columns at 1280 px');
+  return `settled in ${out.ms} ms`;
+});
+
 // The synthesized mic is electrical, so clicks never reach it: this proves the tuner
 // runs alongside the metronome, not that click gating works (see the nearClick unit test).
 await check('tuner reads correctly with the metronome running', async () => {

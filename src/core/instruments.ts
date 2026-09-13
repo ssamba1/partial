@@ -39,7 +39,54 @@ export const STRING_INSTRUMENTS: StringInstrument[] = [
   // No pure fifths: frets are equal tempered, so fretted notes would disagree with pure open strings.
   { id: 'mandolin', label: 'Mandolin', strings: [55, 62, 69, 76] },
   { id: 'banjo', label: 'Banjo (open G)', strings: [67, 50, 55, 59, 62] },
+  // Pitches below are read from the maker's tension chart or tuning page cited on each line (C4 = MIDI 60).
+  // https://www.daddario.com/products/exl110-7-xl-nickel-wound-electric-guitar-strings-7-string-regular-light-10-59
+  { id: 'guitar7', label: 'Guitar (7-string)', strings: [35, 40, 45, 50, 55, 59, 64] },
+  // https://www.daddario.com/products/nyxl0980-nyxl-electric-guitar-strings-nickel-wound-8-string-electric-guitar-strings-super-light-09-80
+  { id: 'guitar8', label: 'Guitar (8-string)', strings: [30, 35, 40, 45, 50, 55, 59, 64] },
+  // Octave strings on the four lowest courses, unisons on the top two: https://www.daddario.com/blogs/guitar/how-to-tune-a-12-string-guitar
+  { id: 'guitar12', label: 'Guitar (12-string)', strings: [40, 52, 45, 57, 50, 62, 55, 67, 59, 64] },
+  // https://www.daddario.com/products/guitar/bass-guitar/xl-nickel-bass/exl170-6-nickel-wound-6-string-bass-light-32-130-long-scale/
+  { id: 'bass6', label: 'Bass (6-string)', strings: [23, 28, 33, 38, 43, 48] },
+  // https://www.daddario.com/products/ej65tlg-pro-arte-custom-extruded-ukulele-tenor-low-g
+  { id: 'ukulele-lowg', label: 'Ukulele (low G)', strings: [55, 60, 64, 69] },
+  // https://www.daddario.com/products/guitar/ukulele/pro-arte-nylon-ukulele/ej65b-pro-arte-custom-extruded-ukulele-baritone/
+  { id: 'ukulele-baritone', label: 'Baritone ukulele (DGBE)', strings: [50, 55, 59, 64] },
+  // https://www.daddario.com/products/guitar/banjo/nickel-plated-steel-banjo/ej63-tenor-banjo-nickel-9-30/
+  { id: 'banjo-tenor', label: 'Tenor banjo (CGDA)', strings: [48, 55, 62, 69] },
+  // https://www.daddario.com/products/ej63i-irish-tenor-banjo-strings-nickel-12-36
+  { id: 'banjo-irish', label: 'Tenor banjo (Irish GDAE)', strings: [43, 50, 57, 64] },
+  // https://www.daddario.com/products/ej76-mandola-strings-phosphor-bronze-medium-15-52
+  { id: 'mandola', label: 'Mandola', strings: [48, 55, 62, 69] },
+  // https://www.daddario.com/products/guitar/mandolin/phosphor-bronze-mandolin/ej80-octave-mandolin.-phosphor-bronze-medium-12-46/
+  { id: 'octave-mandolin', label: 'Octave mandolin', strings: [43, 50, 57, 64] },
+  // https://www.daddario.com/products/guitar/more-instruments/irish-bouzouki/ej81-irish-bouzouki-strings/
+  { id: 'bouzouki-irish', label: 'Bouzouki (Irish GDAD)', strings: [43, 50, 57, 62] },
+  // Octave pairs on the two lowest courses: https://www.daddario.com/products/guitar/more-instruments/greek-bouzouki/
+  { id: 'bouzouki-greek', label: 'Bouzouki (Greek CFAD)', strings: [48, 60, 53, 65, 57, 62] },
+  // 11-string, CFADGC: https://www.daddario.com/products/guitar/more-instruments/arabic-oud/ej95a-arabic-oud-strings/
+  { id: 'oud', label: 'Oud (Arabic CFADGC)', strings: [36, 41, 45, 50, 55, 60] },
+  // Inner string D4, outer A4: https://omeka-s.grinnell.edu/s/MusicalInstruments/item/645
+  { id: 'erhu', label: 'Erhu', strings: [62, 69] },
+  // Viol tunings from the Grove "Viol" article, written d g c' e' a' d'' (c' = middle C):
+  // http://www.newtunings.com/research/GrovesViolArticle.html
+  { id: 'gamba-treble', label: 'Treble viol', strings: [50, 55, 60, 64, 69, 74] },
+  { id: 'gamba-tenor', label: 'Tenor viol', strings: [43, 48, 53, 57, 62, 67] },
+  { id: 'gamba-bass', label: 'Bass viol (viola da gamba)', strings: [38, 43, 48, 52, 57, 62] },
+  // A whole step above orchestral tuning: https://www.daddario.com/products/orchestral/bass/helicore-solo/helicore-solo-bass-string-set-34-scale-medium-tension/
+  { id: 'doublebass-solo', label: 'Double bass (solo tuning)', strings: [30, 35, 40, 45] },
+  // 34 strings, C two octaves below middle C up to A 2 3/4 octaves above it, here in C (all levers down):
+  // https://manufacturing.dustystrings.com/harp-models/ravenna-34 and https://manufacturing.dustystrings.com/harps/about-harps/strings-tuning
+  { id: 'harp-lever34', label: 'Lever harp (34, in C)', strings: diatonic(36, 34) },
 ];
+
+/** `count` white-key notes upward from `from`, for a harp tuned in C. */
+function diatonic(from: number, count: number): number[] {
+  const steps = [0, 2, 4, 5, 7, 9, 11];
+  const out: number[] = [];
+  for (let m = from; out.length < count; m++) if (steps.includes(((m % 12) + 12) % 12)) out.push(m);
+  return out;
+}
 
 const PURE_FIFTH_OFFSET = ratioToCents(3 / 2) - 700;
 
@@ -87,6 +134,21 @@ export function stringFrequency(
     if (Number.isInteger(fifths)) cents += fifths * PURE_FIFTH_OFFSET;
   }
   return base * Math.pow(2, cents / 1200);
+}
+
+/**
+ * Pitch range to search in strings mode: 0.7 x the lowest string to 1.5 x the
+ * highest, so harmonics and neighbouring instruments outside it are not picked up.
+ */
+export function stringSearchRange(instrument: StringInstrument, tuning: TuningSystem, pureFifths: boolean): { min: number; max: number } {
+  let lo = Infinity;
+  let hi = 0;
+  for (let i = 0; i < instrument.strings.length; i++) {
+    const f = stringFrequency(instrument, i, tuning, pureFifths);
+    lo = Math.min(lo, f);
+    hi = Math.max(hi, f);
+  }
+  return { min: lo * 0.7, max: hi * 1.5 };
 }
 
 export interface StringReading {
