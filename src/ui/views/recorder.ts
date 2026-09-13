@@ -109,7 +109,7 @@ export function mountRecorder(root: HTMLElement) {
       if (withClick.checked) metronome.stop();
       time.textContent = '0:00';
     }
-    logPractice(duration);
+    logPractice(duration, 'record');
     const blob = new Blob(recChunks, { type: mime });
     if (blob.size === 0) {
       errorSlot.replaceChildren(errorBox('Nothing was recorded. The microphone may have been disconnected.', () => void toggle()));

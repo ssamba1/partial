@@ -2,6 +2,14 @@ import { frequencyToNote, type NoteReading, type TuningSystem } from '../core/no
 import { detectPitch, PitchSmoother, rms } from '../core/pitch';
 import { acquireMic, ensureRunning, releaseMic } from './context';
 
+export type Damping = 'fast' | 'normal' | 'slow';
+
+const SMOOTHING: Record<Damping, { median: number; ema: number; holdMs: number }> = {
+  fast: { median: 3, ema: 0.6, holdMs: 150 },
+  normal: { median: 5, ema: 0.35, holdMs: 350 },
+  slow: { median: 9, ema: 0.15, holdMs: 700 },
+};
+
 export interface TrackerFrame {
   time: number;
   /** Raw time-domain samples of this frame (reused buffer; copy if you keep it). */
@@ -11,6 +19,20 @@ export interface TrackerFrame {
   frequency: number | null;
   clarity: number;
   note: NoteReading | null;
+  /** Display cents, smoothed further than `note.cents` so the needle glides instead of jittering. */
+  displayCents: number;
+  /** True while the last reading is being held through a short dropout. */
+  held: boolean;
+  /** True if this frame was skipped because a metronome click was sounding. */
+  gated: boolean;
+}
+
+export interface TrackerOptions {
+  tuning: () => TuningSystem;
+  sensitivity?: () => number;
+  damping?: () => Damping;
+  /** Return true to ignore the current frame (e.g. a metronome click is in the mic). */
+  gate?: (audioTime: number) => boolean;
 }
 
 /**
@@ -24,9 +46,11 @@ export class PitchTracker {
   private buffer = new Float32Array(4096);
   private smoother = new PitchSmoother(5);
   private listeners = new Set<(f: TrackerFrame) => void>();
+  private last: { note: NoteReading; frequency: number; clarity: number; at: number } | null = null;
+  private displayCents = 0;
   running = false;
 
-  constructor(public tuning: () => TuningSystem, public sensitivity: () => number = () => 0.008) {}
+  constructor(private opts: TrackerOptions) {}
 
   onFrame(fn: (f: TrackerFrame) => void): () => void {
     this.listeners.add(fn);
@@ -44,23 +68,54 @@ export class PitchTracker {
     this.source.connect(this.analyser);
     this.running = true;
     this.smoother.reset();
+    this.last = null;
 
     const loop = () => {
       if (!this.running || !this.analyser) return;
+      const damping = SMOOTHING[this.opts.damping?.() ?? 'normal'];
       this.analyser.getFloatTimeDomainData(this.buffer);
-      const result = detectPitch(this.buffer, {
-        sampleRate: ctx.sampleRate,
-        minRms: this.sensitivity(),
-      });
-      const smoothed = this.smoother.push(result?.frequency ?? null);
+      const now = performance.now();
+      const gated = this.opts.gate?.(ctx.currentTime) ?? false;
+
+      let note: NoteReading | null = null;
+      let frequency: number | null = null;
+      let clarity = 0;
+      let held = false;
+      let level = rms(this.buffer);
+
+      if (!gated) {
+        const result = detectPitch(this.buffer, { sampleRate: ctx.sampleRate, minRms: this.opts.sensitivity?.() ?? 0.008 });
+        this.smoother.setSize(damping.median);
+        frequency = this.smoother.push(result?.frequency ?? null);
+        if (result) level = result.rms;
+        if (frequency) {
+          clarity = result?.clarity ?? 0;
+          note = frequencyToNote(frequency, this.opts.tuning());
+          const jumped = this.last && this.last.note.midi !== note.midi;
+          this.displayCents = jumped ? note.cents : this.displayCents + (note.cents - this.displayCents) * damping.ema;
+          this.last = { note, frequency, clarity, at: now };
+        }
+      }
+
+      // Hold the last reading briefly through dropouts and gated frames, so the display doesn't flicker.
+      if (!note && this.last && now - this.last.at < damping.holdMs) {
+        ({ note, frequency, clarity } = this.last);
+        held = true;
+      } else if (!note) {
+        this.last = null;
+      }
+
       const frame: TrackerFrame = {
         time: ctx.currentTime,
         samples: this.buffer,
         sampleRate: ctx.sampleRate,
-        level: result?.rms ?? rms(this.buffer),
-        frequency: smoothed,
-        clarity: result?.clarity ?? 0,
-        note: smoothed ? frequencyToNote(smoothed, this.tuning()) : null,
+        level,
+        frequency,
+        clarity,
+        note,
+        displayCents: note ? this.displayCents : 0,
+        held,
+        gated,
       };
       this.listeners.forEach((fn) => fn(frame));
       this.raf = requestAnimationFrame(loop);

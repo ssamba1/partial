@@ -219,7 +219,7 @@ export function mountClickTrack(root: HTMLElement) {
   }
 
   function finish() {
-    if (playStartedAt) logPractice((performance.now() - playStartedAt) / 1000);
+    if (playStartedAt) logPractice((performance.now() - playStartedAt) / 1000, 'metronome');
     playStartedAt = 0;
     playBtn.textContent = 'Play';
   }

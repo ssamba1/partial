@@ -110,4 +110,9 @@ export class PitchSmoother {
   reset(): void {
     this.values = [];
   }
+
+  setSize(size: number): void {
+    this.size = Math.max(1, Math.floor(size));
+    while (this.values.length > this.size) this.values.shift();
+  }
 }

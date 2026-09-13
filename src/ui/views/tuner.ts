@@ -1,190 +1,405 @@
-import { MicError } from '../../audio/context';
-import { NOTE_NAMES_SHARP, noteName, TEMPERAMENTS, TRANSPOSITIONS, transpose } from '../../core/notes';
+import { ensureRunning, getMaster, MicError } from '../../audio/context';
+import { Drone } from '../../audio/voices';
 import { formatCents } from '../../core/format';
-import { getSettings, logPractice, subscribeSettings, updateSettings } from '../../store/settings';
-import { cssVar, errorBox, field, fitCanvas, h, numberInput, select } from '../dom';
-import { createTracker } from '../shared';
+import { nearestString, STRING_INSTRUMENTS, stringFrequency } from '../../core/instruments';
+import { noteName, TRANSPOSITIONS, transpose } from '../../core/notes';
+import { getSettings, subscribeSettings, tuningOf, updateSettings, type Settings } from '../../store/settings';
+import { haptic, iconButton, openSheet, segmented } from '../components';
+import { cssVar, errorBox, fitCanvas, h, select } from '../dom';
+import { createPitchRing } from '../pitchRing';
+import { ActivityTimer, createTracker, recordTuningFrame } from '../shared';
 
-const HISTORY_SECONDS = 8;
+const HISTORY_SECONDS = 10;
+const HOLD_SECONDS = 1.2;
+
+const RANGES: { value: string; label: string; cents: number }[] = [
+  { value: '10', label: 'Wide ±10', cents: 10 },
+  { value: '5', label: 'Normal ±5', cents: 5 },
+  { value: '2', label: 'Fine ±2', cents: 2 },
+  { value: '1', label: 'Ultra ±1', cents: 1 },
+];
+
+function openTunerOptions() {
+  const s = getSettings();
+  const body = h(
+    'div',
+    { class: 'stack' },
+    h(
+      'div',
+      { class: 'field' },
+      h('span', { class: 'field-label' }, 'In-tune range'),
+      segmented(RANGES.map((r) => ({ value: r.value, label: r.label })), String(s.tolerance), (v) => updateSettings({ tolerance: Number(v) }), 'In-tune range'),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h('span', { class: 'field-label' }, 'Steadiness'),
+      segmented(
+        [
+          { value: 'fast', label: 'Responsive' },
+          { value: 'normal', label: 'Balanced' },
+          { value: 'slow', label: 'Steady' },
+        ],
+        s.damping,
+        (v) => updateSettings({ damping: v as Settings['damping'] }),
+        'Steadiness',
+      ),
+      h('small', null, 'Steady smooths the reading for sustained notes (winds, voice). Responsive follows fast passages and plucked strings.'),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h('span', { class: 'field-label' }, 'Microphone'),
+      segmented(
+        [
+          { value: '0.002', label: 'Quiet room' },
+          { value: '0.008', label: 'Normal' },
+          { value: '0.02', label: 'Noisy room' },
+        ],
+        String(s.sensitivity),
+        (v) => updateSettings({ sensitivity: Number(v) }),
+        'Microphone sensitivity',
+      ),
+    ),
+    h(
+      'label',
+      { class: 'switch-row' },
+      h('span', null, h('strong', null, 'Ignore the metronome'), h('small', null, 'Skips the instant each click sounds, so the tuner keeps reading your note while the metronome plays.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: s.ignoreClick, onchange: (e: Event) => updateSettings({ ignoreClick: (e.target as HTMLInputElement).checked }) }),
+    ),
+  );
+  openSheet('Tuner options', body);
+}
 
 export function mountTuner(root: HTMLElement) {
   const tracker = createTracker();
+  const timer = new ActivityTimer('tuner');
   const history: { t: number; cents: number | null }[] = [];
-  let startedAt = 0;
+  let inTuneSince: number | null = null;
+  let lockedNote: number | null = null;
+  let lockedFired = false;
+  let refDrone: { drone: Drone; index: number; timeout: number } | null = null;
+  let manualString: number | null = null;
 
-  const nameEl = h('span', null, '–');
-  const octaveEl = h('span', { class: 'tuner-octave' });
-  const noteEl = h('div', { class: 'tuner-note', 'aria-live': 'polite' }, nameEl, octaveEl);
-  const centsEl = h('div', { class: 'tuner-cents' }, '');
-  const freqEl = h('div', { class: 'tuner-freq muted' }, 'Press start and play a note');
-  const needle = h('div', { class: 'needle' });
-  const band = h('div', { class: 'in-tune-band' });
-  const gauge = h(
+  /* ----- Display elements ----- */
+  const ring = createPitchRing();
+  const noteEl = h('span', { class: 'big-note' }, '–');
+  const accidentalEl = h('span', { class: 'big-acc' });
+  const octaveEl = h('span', { class: 'big-oct' });
+  const centsEl = h('div', { class: 'big-cents' }, '');
+  const hint = h('div', { class: 'ring-hint' }, 'Tap to start');
+  ring.center.append(h('div', { class: 'note-line' }, noteEl, h('span', { class: 'note-sup' }, accidentalEl, octaveEl)), centsEl, hint);
+
+  const barNeedle = h('div', { class: 'bar-needle' });
+  const barZone = h('div', { class: 'bar-zone' });
+  const barNote = h('div', { class: 'bar-note' }, '–');
+  const barCents = h('div', { class: 'bar-cents' });
+  const barMeter = h(
     'div',
-    { class: 'gauge', role: 'img', 'aria-label': 'Tuning needle' },
-    band,
-    h('div', { class: 'gauge-ticks' }, ...[-50, -25, 0, 25, 50].map((c) => h('span', { style: `left:${50 + c}%` }, c === 0 ? '0' : String(c)))),
-    needle,
+    { class: 'bar-meter' },
+    barZone,
+    h('div', { class: 'bar-scale' }, ...[-50, -40, -30, -20, -10, 0, 10, 20, 30, 40, 50].map((c) => h('span', { style: `left:${50 + c}%`, class: c % 50 === 0 || c === 0 ? 'major' : '' }, c % 25 === 0 ? String(Math.abs(c)) : ''))),
+    barNeedle,
   );
+  const barView = h('div', { class: 'bar-view' }, h('div', { class: 'bar-head' }, barNote, barCents), barMeter, h('div', { class: 'bar-legend' }, h('span', null, '♭ flat'), h('span', null, 'sharp ♯')));
+
+  const freqEl = h('div', { class: 'tuner-meta' }, h('span', null, 'Play a note to begin'));
+  const levelFill = h('div', { class: 'level-fill' });
   const trace = h('canvas', { class: 'trace', 'aria-hidden': 'true' });
-  const levelBar = h('div', { class: 'level-fill' });
   const errorSlot = h('div');
 
-  const startBtn = h('button', { class: 'primary big', onclick: () => toggle() }, 'Start tuner');
+  const display = h('button', { class: 'tuner-stage', 'aria-label': 'Start or stop the tuner', onclick: () => void toggle() }, ring.el, barView);
 
+  /* ----- Strings mode ----- */
+  const stringsRow = h('div', { class: 'strings-row', role: 'group', 'aria-label': 'Strings' });
+  const instrumentSelect = select(
+    STRING_INSTRUMENTS.map((i) => ({ value: i.id, label: i.label })),
+    getSettings().stringInstrument,
+    (v) => {
+      manualString = null;
+      updateSettings({ stringInstrument: v });
+    },
+    { 'aria-label': 'Instrument', class: 'compact' },
+  );
+  const autoChip = h('button', { class: 'chip', onclick: () => { manualString = null; renderStrings(null, null); } }, 'Auto');
+  const pureChip = h('label', { class: 'chip toggle' }, h('input', { type: 'checkbox', checked: getSettings().pureFifths, onchange: (e: Event) => updateSettings({ pureFifths: (e.target as HTMLInputElement).checked }) }), 'Pure fifths');
+  const stringsPanel = h('div', { class: 'strings-panel' }, h('div', { class: 'row wrap tight' }, instrumentSelect, autoChip, pureChip), stringsRow);
+
+  function instrument() {
+    return STRING_INSTRUMENTS.find((i) => i.id === getSettings().stringInstrument) ?? STRING_INSTRUMENTS[0];
+  }
+
+  function renderStrings(activeIndex: number | null, cents: number | null) {
+    const inst = instrument();
+    const s = getSettings();
+    pureChip.hidden = inst.pureFifthsFrom === undefined;
+    autoChip.classList.toggle('on', manualString === null);
+    if (stringsRow.children.length !== inst.strings.length || stringsRow.dataset.inst !== inst.id + s.flats) {
+      stringsRow.dataset.inst = inst.id + s.flats;
+      stringsRow.replaceChildren(
+        ...inst.strings.map((midi, i) =>
+          h(
+            'button',
+            { class: 'string-btn', 'data-i': i, onclick: (e: Event) => { e.stopPropagation(); void pressString(i); } },
+            h('span', { class: 'string-name' }, noteName(midi, s.flats, false)),
+            h('span', { class: 'string-oct' }, String(Math.floor(midi / 12) - 1)),
+            h('span', { class: 'string-dot' }),
+          ),
+        ),
+      );
+    }
+    [...stringsRow.children].forEach((b, i) => {
+      const el = b as HTMLElement;
+      const on = i === activeIndex;
+      el.classList.toggle('active', on);
+      el.classList.toggle('good', on && cents !== null && Math.abs(cents) <= s.tolerance);
+      el.classList.toggle('close', on && cents !== null && Math.abs(cents) > s.tolerance && Math.abs(cents) <= 20);
+      el.classList.toggle('is-sharp', on && cents !== null && cents > s.tolerance);
+      el.classList.toggle('is-flat', on && cents !== null && cents < -s.tolerance);
+      el.classList.toggle('manual', i === manualString);
+      el.classList.toggle('sounding', refDrone?.index === i);
+    });
+  }
+
+  async function pressString(i: number) {
+    manualString = i;
+    const inst = instrument();
+    const s = getSettings();
+    if (refDrone) {
+      const wasSame = refDrone.index === i;
+      stopRef();
+      if (wasSame) {
+        renderStrings(i, null);
+        return;
+      }
+    }
+    const ctx = await ensureRunning();
+    const drone = new Drone(ctx, getMaster(), stringFrequency(inst, i, tuningOf(s), s.pureFifths), 'strings', 0.7);
+    refDrone = { drone, index: i, timeout: window.setTimeout(stopRef, 4000) };
+    renderStrings(i, null);
+  }
+
+  function stopRef() {
+    if (!refDrone) return;
+    window.clearTimeout(refDrone.timeout);
+    refDrone.drone.stop();
+    refDrone = null;
+    renderStrings(manualString, null);
+  }
+
+  /* ----- Start / stop ----- */
   async function toggle() {
     errorSlot.replaceChildren();
     if (tracker.running) {
       tracker.stop();
-      logPractice((performance.now() - startedAt) / 1000);
-      startBtn.textContent = 'Start tuner';
-      freqEl.textContent = 'Stopped';
+      timer.stop();
+      root.querySelector('.tuner')?.classList.remove('listening');
+      hint.textContent = 'Tap to start';
+      freqEl.replaceChildren(h('span', null, 'Paused'));
       return;
     }
     try {
       await tracker.start();
-      startedAt = performance.now();
-      startBtn.textContent = 'Stop';
-      freqEl.textContent = 'Listening…';
+      timer.start();
+      root.querySelector('.tuner')?.classList.add('listening');
+      hint.textContent = 'Listening';
     } catch (err) {
       const msg = err instanceof MicError ? err.message : 'Could not start the microphone.';
       errorSlot.replaceChildren(errorBox(msg, () => void toggle()));
     }
   }
 
-  function applyBand() {
-    const tol = getSettings().tolerance;
-    band.style.left = `${50 - tol}%`;
-    band.style.width = `${tol * 2}%`;
-  }
-  applyBand();
-
+  /* ----- Frame handling ----- */
   const offFrame = tracker.onFrame((f) => {
     const s = getSettings();
-    levelBar.style.width = `${Math.min(100, Math.sqrt(f.level) * 250)}%`;
-    history.push({ t: f.time, cents: f.note ? f.note.cents : null });
+    levelFill.style.transform = `scaleX(${Math.min(1, Math.sqrt(f.level) * 2.5)})`;
+    const semis = TRANSPOSITIONS.find((t) => t.id === s.transposition)?.semitones ?? 0;
+
+    let cents: number | null = null;
+    let displayMidi: number | null = null;
+    let target = 0;
+
+    if (f.note && f.frequency) {
+      if (s.tunerMode === 'strings') {
+        const inst = instrument();
+        const reading = manualString !== null
+          ? { index: manualString, target: stringFrequency(inst, manualString, tuningOf(s), s.pureFifths), cents: 0 }
+          : nearestString(f.frequency, inst, tuningOf(s), s.pureFifths);
+        reading.cents = 1200 * Math.log2(f.frequency / reading.target);
+        cents = reading.cents;
+        target = reading.target;
+        displayMidi = inst.strings[reading.index];
+        renderStrings(reading.index, cents);
+        if (Math.abs(cents) > 50) cents = Math.sign(cents) * 50;
+      } else {
+        cents = f.displayCents;
+        target = f.note.target;
+        displayMidi = transpose(f.note.midi, semis);
+      }
+    } else if (s.tunerMode === 'strings') {
+      renderStrings(manualString, null);
+    }
+
+    if (!f.held && !f.gated) recordTuningFrame(cents);
+    history.push({ t: f.time, cents });
     while (history.length && f.time - history[0].t > HISTORY_SECONDS) history.shift();
 
-    if (!f.note) {
-      gauge.classList.remove('good');
-      needle.classList.add('idle');
+    const inTune = cents !== null && Math.abs(cents) <= s.tolerance;
+    if (inTune && displayMidi !== null) {
+      if (inTuneSince === null || lockedNote !== displayMidi) {
+        inTuneSince = f.time;
+        lockedNote = displayMidi;
+        lockedFired = false;
+      }
+    } else if (!f.held) {
+      inTuneSince = null;
+      lockedFired = false;
+    }
+    const hold = inTuneSince !== null ? (f.time - inTuneSince) / HOLD_SECONDS : 0;
+    if (hold >= 1 && !lockedFired) {
+      lockedFired = true;
+      haptic(12);
+    }
+
+    if (displayMidi === null || cents === null) {
+      ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats);
+      root.querySelector('.tuner')?.classList.remove('has-note');
+      barNeedle.style.left = '50%';
       drawTrace();
       return;
     }
-    const semis = TRANSPOSITIONS.find((t) => t.id === s.transposition)?.semitones ?? 0;
-    const written = transpose(f.note.midi, semis);
-    nameEl.textContent = noteName(written, s.flats, false);
-    octaveEl.textContent = String(Math.floor(written / 12) - 1);
-    const cents = f.note.cents;
-    centsEl.textContent = formatCents(cents);
-    freqEl.textContent = `${f.frequency!.toFixed(1)} Hz · target ${f.note.target.toFixed(1)} Hz`;
-    needle.classList.remove('idle');
-    needle.style.left = `${50 + Math.max(-50, Math.min(50, cents))}%`;
-    const good = Math.abs(cents) <= s.tolerance;
-    gauge.classList.toggle('good', good);
-    centsEl.classList.toggle('good', good);
-    centsEl.classList.toggle('sharp', cents > s.tolerance);
-    centsEl.classList.toggle('flat', cents < -s.tolerance);
+
+    root.querySelector('.tuner')?.classList.add('has-note');
+    const name = noteName(displayMidi, s.flats, false);
+    noteEl.textContent = name[0];
+    accidentalEl.textContent = name.slice(1).replace('#', '♯').replace('b', '♭');
+    octaveEl.textContent = String(Math.floor(displayMidi / 12) - 1);
+    // Words as well as colour, so the state reads without relying on colour vision.
+    const direction = `${Math.abs(Math.round(cents))}¢ ${cents > 0 ? 'sharp' : 'flat'}`;
+    centsEl.textContent = inTune ? 'in tune' : direction;
+    barNote.textContent = `${name.replace('#', '♯').replace('b', '♭')}${Math.floor(displayMidi / 12) - 1}`;
+    barCents.textContent = inTune ? `${formatCents(cents)} in tune` : direction;
+    barNeedle.style.left = `${50 + Math.max(-50, Math.min(50, cents))}%`;
+    barMeter.classList.toggle('good', inTune);
+
+    ring.update({ pitchClass: ((displayMidi % 12) + 12) % 12, cents, inTune, hold }, s.tolerance, s.flats);
+    const stage = root.querySelector('.tuner');
+    stage?.classList.toggle('in-tune', inTune);
+    stage?.classList.toggle('sharp', !inTune && cents > 0);
+    stage?.classList.toggle('flat', !inTune && cents < 0);
+    freqEl.replaceChildren(
+      h('span', null, h('b', null, f.frequency!.toFixed(1)), ' Hz'),
+      h('span', { class: 'sep' }),
+      h('span', null, 'target ', h('b', null, target.toFixed(1)), ' Hz'),
+    );
     drawTrace();
   });
 
   function drawTrace() {
     const ctx = fitCanvas(trace);
     const w = trace.clientWidth;
-    const hgt = trace.clientHeight;
-    ctx.clearRect(0, 0, w, hgt);
+    const hh = trace.clientHeight;
+    ctx.clearRect(0, 0, w, hh);
     const tol = getSettings().tolerance;
-    const y = (c: number) => hgt / 2 - (c / 50) * (hgt / 2);
+    const y = (c: number) => hh / 2 - (c / 50) * (hh / 2 - 4);
     ctx.fillStyle = cssVar('--good-soft');
-    ctx.fillRect(0, y(tol), w, y(-tol) - y(tol));
-    ctx.strokeStyle = cssVar('--border');
-    ctx.beginPath();
-    ctx.moveTo(0, hgt / 2);
-    ctx.lineTo(w, hgt / 2);
-    ctx.stroke();
+    ctx.fillRect(0, y(Math.max(tol, 1)), w, y(-Math.max(tol, 1)) - y(Math.max(tol, 1)));
     if (!history.length) return;
     const now = history[history.length - 1].t;
-    ctx.strokeStyle = cssVar('--accent');
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    let drawing = false;
+    const good = cssVar('--good');
+    const sharp = cssVar('--sharp');
+    const flat = cssVar('--flat');
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    let prev: { x: number; y: number } | null = null;
     for (const p of history) {
       const x = w - ((now - p.t) / HISTORY_SECONDS) * w;
       if (p.cents === null) {
-        drawing = false;
+        prev = null;
         continue;
       }
-      const yy = y(Math.max(-50, Math.min(50, p.cents)));
-      if (drawing) ctx.lineTo(x, yy);
-      else ctx.moveTo(x, yy);
-      drawing = true;
+      const c = Math.max(-50, Math.min(50, p.cents));
+      const yy = y(c);
+      if (prev) {
+        ctx.strokeStyle = Math.abs(c) <= tol ? good : c > 0 ? sharp : flat;
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(x, yy);
+        ctx.stroke();
+      }
+      prev = { x, y: yy };
     }
-    ctx.stroke();
   }
 
-  const s = getSettings();
-  const settingsPanel = h(
-    'details',
-    { class: 'panel' },
-    h('summary', null, 'Tuner settings'),
-    h(
-      'div',
-      { class: 'grid' },
-      field('A4 reference (Hz)', numberInput(s.a4, (n) => updateSettings({ a4: Math.min(480, Math.max(400, n)) }), { min: 400, max: 480, step: 0.5 })),
-      field('Instrument key', select(TRANSPOSITIONS.map((t) => ({ value: t.id, label: t.label })), s.transposition, (v) => updateSettings({ transposition: v }))),
-      field('Temperament', select(TEMPERAMENTS.map((t) => ({ value: t.id, label: t.label })), s.temperament, (v) => updateSettings({ temperament: v as typeof s.temperament }))),
-      field(
-        'Tonic (for temperaments)',
-        select(NOTE_NAMES_SHARP.map((n, i) => ({ value: i, label: n })), s.tonic, (v) => updateSettings({ tonic: Number(v) })),
-        'Concert pitch key the temperament is built on',
-      ),
-      field('In-tune range (± cents)', numberInput(s.tolerance, (n) => updateSettings({ tolerance: Math.min(25, Math.max(1, n)) }), { min: 1, max: 25, step: 1 })),
-      field(
-        'Mic sensitivity',
-        select(
-          [
-            { value: 0.002, label: 'Very high (quiet room)' },
-            { value: 0.008, label: 'Normal' },
-            { value: 0.02, label: 'Low (noisy room)' },
-          ],
-          s.sensitivity,
-          (v) => updateSettings({ sensitivity: Number(v) }),
-        ),
-      ),
-      field('Note names', select([{ value: 'sharp', label: 'Sharps (C#)' }, { value: 'flat', label: 'Flats (Db)' }], s.flats ? 'flat' : 'sharp', (v) => updateSettings({ flats: v === 'flat' }))),
-    ),
+  /* ----- Layout ----- */
+  const s0 = getSettings();
+  const modeSeg = segmented(
+    [
+      { value: 'chromatic', label: 'Chromatic', icon: 'tuner' },
+      { value: 'strings', label: 'Strings', icon: 'strings' },
+    ],
+    s0.tunerMode,
+    (v) => updateSettings({ tunerMode: v as Settings['tunerMode'] }),
+    'Tuner mode',
+  );
+  const displaySeg = segmented(
+    [
+      { value: 'ring', label: 'Ring', icon: 'ring' },
+      { value: 'bar', label: 'Bar', icon: 'bar' },
+    ],
+    s0.tunerDisplay,
+    (v) => updateSettings({ tunerDisplay: v as Settings['tunerDisplay'] }),
+    'Display style',
   );
 
-  const offSettings = subscribeSettings(applyBand);
-
-  root.append(
-    h(
-      'section',
-      { class: 'view tuner' },
-      h('div', { class: 'tuner-display' }, noteEl, centsEl, gauge, freqEl, h('div', { class: 'level', title: 'Input level' }, levelBar)),
-      trace,
-      errorSlot,
-      h('div', { class: 'row center' }, startBtn),
-      settingsPanel,
-    ),
+  const view = h(
+    'section',
+    { class: 'view tuner' },
+    h('div', { class: 'toolbar' }, modeSeg, h('div', { class: 'toolbar-end' }, displaySeg, iconButton('gear', 'Tuner options', openTunerOptions))),
+    stringsPanel,
+    display,
+    h('div', { class: 'level' }, levelFill),
+    freqEl,
+    errorSlot,
+    h('div', { class: 'trace-wrap' }, h('div', { class: 'trace-label' }, h('span', null, 'Last 10 seconds'), h('span', { class: 'muted' }, 'sharp ↑  flat ↓')), trace),
   );
-  drawTrace();
+  root.append(view);
+
+  function applySettings() {
+    const s = getSettings();
+    view.dataset.display = s.tunerDisplay;
+    view.dataset.mode = s.tunerMode;
+    stringsPanel.hidden = s.tunerMode !== 'strings';
+    modeSeg.set(s.tunerMode);
+    displaySeg.set(s.tunerDisplay);
+    barZone.style.left = `${50 - s.tolerance}%`;
+    barZone.style.width = `${s.tolerance * 2}%`;
+    instrumentSelect.value = s.stringInstrument;
+    if (s.tunerMode === 'strings') renderStrings(manualString, null);
+    ring.update({ pitchClass: null, cents: 0, inTune: false, hold: 0 }, s.tolerance, s.flats);
+    drawTrace();
+  }
+  applySettings();
+  const offSettings = subscribeSettings(applySettings);
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.code === 'Space' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLButtonElement) return;
+    if (e.code === 'Space') {
       e.preventDefault();
       void toggle();
     }
   };
   window.addEventListener('keydown', onKey);
+  const onResize = () => drawTrace();
+  window.addEventListener('resize', onResize);
 
   return () => {
     window.removeEventListener('keydown', onKey);
+    window.removeEventListener('resize', onResize);
     offFrame();
     offSettings();
-    if (tracker.running) {
-      tracker.stop();
-      logPractice((performance.now() - startedAt) / 1000);
-    }
+    stopRef();
+    tracker.stop();
+    timer.stop();
   };
 }

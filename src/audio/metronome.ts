@@ -23,6 +23,9 @@ export class Metronome {
   private listeners = new Set<BeatListener>();
   private stateListeners = new Set<(playing: boolean) => void>();
   private barsPlayed = 0;
+  /** Recent click times (AudioContext seconds), so the tuner can ignore the click bleeding into the mic. */
+  readonly recentClicks = new Float64Array(16);
+  private clickCursor = 0;
   settings: MetronomeSettings;
 
   constructor(settings: MetronomeSettings) {
@@ -93,7 +96,13 @@ export class Metronome {
 
     this.scheduler.start(
       next,
-      (e) => playClick(ctx, getMaster(), e.when, e.level, this.settings.sound, this.settings.volume),
+      (e) => {
+        if (e.level !== 'silent') {
+          this.recentClicks[this.clickCursor] = e.when;
+          this.clickCursor = (this.clickCursor + 1) % this.recentClicks.length;
+        }
+        playClick(ctx, getMaster(), e.when, e.level, this.settings.sound, this.settings.volume);
+      },
       (e) => this.listeners.forEach((fn) => fn(e)),
     );
     this.stateListeners.forEach((fn) => fn(true));

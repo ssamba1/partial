@@ -1,94 +1,232 @@
+﻿import '@fontsource-variable/inter';
+import '@fontsource-variable/space-grotesk';
 import './styles.css';
+import { activeNotes, onDronesChange, stopAll } from './audio/droneBank';
+import { noteName } from './core/notes';
+import { getSettings, subscribeSettings, updateSettings } from './store/settings';
+import { holdButton, iconButton, openSheet } from './ui/components';
 import { h } from './ui/dom';
+import { icon, type IconName } from './ui/icons';
 import { startRouter, type Route } from './ui/router';
-import { metronome } from './ui/shared';
+import { metronome, onSession, resetSession } from './ui/shared';
+import { openTuningSheet, tuningSummary } from './ui/tuningSheet';
 import { mountAnalysis } from './ui/views/analysis';
 import { mountClickTrack } from './ui/views/clicktrack';
-import { activeDroneCount, mountDrone, onDronesChange, stopAllDrones } from './ui/views/drone';
-import { mountMetronome } from './ui/views/metronome';
+import { mountMetronome, setMetronome } from './ui/views/metronome';
 import { applyTheme, mountPractice } from './ui/views/practice';
 import { mountRecorder } from './ui/views/recorder';
+import { mountSound } from './ui/views/sound';
 import { mountTuner } from './ui/views/tuner';
 
-const routes: Route[] = [
-  { path: 'tuner', label: 'Tuner', icon: '\u{1F3AF}', mount: mountTuner },
-  { path: 'metronome', label: 'Metronome', icon: '⏱', mount: mountMetronome },
-  { path: 'drone', label: 'Drone', icon: '∿', mount: mountDrone },
-  { path: 'clicktrack', label: 'Click track', icon: '≡', mount: mountClickTrack },
-  { path: 'record', label: 'Record', icon: '●', mount: mountRecorder },
-  { path: 'analysis', label: 'Analysis', icon: '\u{1F4C8}', mount: mountAnalysis },
-  {
-    path: 'sheet',
-    label: 'Sheet music',
-    icon: '\u{1D11E}',
-    // pdf.js is large, so it only loads when this screen is opened.
-    mount: (root) => {
-      let cleanup: (() => void) | undefined;
-      let cancelled = false;
-      root.append(h('p', { class: 'muted' }, 'Loading sheet music reader…'));
-      import('./ui/views/sheetmusic')
-        .then(({ mountSheetMusic }) => {
-          if (cancelled) return;
-          root.replaceChildren();
-          cleanup = mountSheetMusic(root);
-        })
-        .catch(() => {
-          if (!cancelled) root.replaceChildren(h('p', { class: 'muted' }, 'Could not load the sheet music reader. Check your connection and reload.'));
-        });
-      return () => {
-        cancelled = true;
-        cleanup?.();
-      };
-    },
-  },
-  { path: 'practice', label: 'Practice', icon: '★', mount: mountPractice },
+interface AppRoute extends Route {
+  iconName: IconName;
+  primary: boolean;
+}
+
+function lazySheetMusic(root: HTMLElement) {
+  let cleanup: (() => void) | undefined;
+  let cancelled = false;
+  root.append(h('div', { class: 'loading' }, h('span', { class: 'spinner' }), 'Loading the sheet music reader…'));
+  import('./ui/views/sheetmusic')
+    .then(({ mountSheetMusic }) => {
+      if (cancelled) return;
+      root.replaceChildren();
+      cleanup = mountSheetMusic(root);
+    })
+    .catch(() => {
+      if (!cancelled) root.replaceChildren(h('p', { class: 'muted' }, 'Could not load the sheet music reader. Check your connection and reload.'));
+    });
+  return () => {
+    cancelled = true;
+    cleanup?.();
+  };
+}
+
+const routes: AppRoute[] = [
+  { path: 'tuner', label: 'Tuner', iconName: 'tuner', primary: true, mount: mountTuner },
+  { path: 'metronome', label: 'Metronome', iconName: 'metronome', primary: true, mount: mountMetronome },
+  { path: 'sound', label: 'Sound', iconName: 'sound', primary: true, mount: mountSound },
+  { path: 'analysis', label: 'Analysis', iconName: 'analysis', primary: true, mount: mountAnalysis },
+  { path: 'record', label: 'Record', iconName: 'record', primary: false, mount: mountRecorder },
+  { path: 'clicktrack', label: 'Click tracks', iconName: 'clicktrack', primary: false, mount: mountClickTrack },
+  { path: 'sheet', label: 'Sheet music', iconName: 'sheet', primary: false, mount: lazySheetMusic },
+  { path: 'practice', label: 'Practice', iconName: 'practice', primary: false, mount: mountPractice },
 ];
 
+// Old links from the first version.
+if (location.hash === '#/drone') location.hash = '#/sound';
+
 applyTheme();
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 
-const nav = h('nav', { class: 'tabs', 'aria-label': 'Sections' });
-const heading = h('h1', { class: 'view-title' });
-const outlet = h('main', { id: 'main', tabindex: '-1' });
-const statusBar = h('div', { class: 'status-bar', 'aria-live': 'polite' });
+/* ---------- Navigation ---------- */
 
-function renderStatus() {
-  const parts: HTMLElement[] = [];
-  if (metronome.playing) {
-    parts.push(h('button', { class: 'pill', onclick: () => metronome.stop() }, `⏱ ${metronome.settings.bpm} BPM · stop`));
-  }
-  const drones = activeDroneCount();
-  if (drones) parts.push(h('button', { class: 'pill', onclick: stopAllDrones }, `∿ ${drones} drone${drones > 1 ? 's' : ''} · stop`));
-  statusBar.replaceChildren(...parts);
-  statusBar.hidden = parts.length === 0;
-}
-metronome.onState(renderStatus);
-onDronesChange(renderStatus);
-metronome.onBeat((e) => e.beat === 0 && e.sub === 0 && renderStatus());
+const navLink = (r: AppRoute, cls: string) =>
+  h('a', { href: `#/${r.path}`, class: cls, 'data-path': r.path }, icon(r.iconName, 22), h('span', null, r.label));
 
-nav.replaceChildren(
-  ...routes.map((r) =>
-    h('a', { href: `#/${r.path}`, 'data-path': r.path }, h('span', { class: 'tab-icon', 'aria-hidden': 'true' }, r.icon), h('span', { class: 'tab-label' }, r.label)),
-  ),
+const rail = h(
+  'nav',
+  { class: 'rail', 'aria-label': 'Sections' },
+  h('a', { class: 'rail-brand', href: '#/tuner', 'aria-label': 'Resonare home' }, h('span', { class: 'logo-mark', 'aria-hidden': 'true' }), h('span', null, 'Resonare')),
+  h('div', { class: 'rail-group' }, routes.filter((r) => r.primary).map((r) => navLink(r, 'rail-link'))),
+  h('div', { class: 'rail-label' }, 'Practice tools'),
+  h('div', { class: 'rail-group' }, routes.filter((r) => !r.primary).map((r) => navLink(r, 'rail-link'))),
 );
 
+function openMore() {
+  let close = () => {};
+  const grid = h(
+    'div',
+    { class: 'more-grid' },
+    routes
+      .filter((r) => !r.primary)
+      .map((r) =>
+        h('a', { href: `#/${r.path}`, class: 'more-tile', onclick: () => close() }, h('span', { class: 'more-icon' }, icon(r.iconName, 26)), h('span', null, r.label)),
+      ),
+  );
+  close = openSheet('More tools', grid);
+}
+
+const moreBtn = h('button', { class: 'tab-link', onclick: openMore, 'data-more': 'true' }, icon('more', 22), h('span', null, 'More'));
+const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Sections' }, routes.filter((r) => r.primary).map((r) => navLink(r, 'tab-link')), moreBtn);
+
+/* ---------- Top bar ---------- */
+
+const title = h('h1', { class: 'page-title' });
+const tuningLong = h('span', { class: 'long' });
+const tuningShort = h('span', { class: 'short' });
+const tuningChip = h('button', { class: 'tuning-chip', onclick: openTuningSheet, 'aria-label': 'Tuning settings' }, icon('tuner', 16), tuningLong, tuningShort);
+function renderTuningChip() {
+  tuningLong.textContent = tuningSummary();
+  const s = getSettings();
+  tuningShort.textContent = `${s.a4 % 1 ? s.a4.toFixed(1) : s.a4}${s.transposition === 'C' ? '' : ` ${s.transposition.replace('b', '♭')}`}`;
+}
+const sessionFill = h('i');
+const sessionText = h('span');
+const sessionChip = h(
+  'button',
+  { class: 'session-chip', title: 'Share of notes in tune this session. Tap to reset.', onclick: () => resetSession() },
+  h('span', { class: 'session-bar' }, sessionFill),
+  sessionText,
+);
+onSession(({ voiced, inTune }) => {
+  sessionChip.hidden = voiced < 30;
+  const pct = voiced ? Math.round((inTune / voiced) * 100) : 0;
+  sessionFill.style.width = `${pct}%`;
+  sessionText.textContent = `${pct}% in tune`;
+});
+
+function openHelp() {
+  const row = (keys: string[], text: string) => h('div', { class: 'shortcut' }, h('span', null, ...keys.map((k) => h('kbd', null, k))), h('span', null, text));
+  openSheet(
+    'Shortcuts and tips',
+    h(
+      'div',
+      { class: 'stack' },
+      row(['Space'], 'Start or stop the tuner, metronome or analysis on the current screen'),
+      row(['↑', '↓'], 'Change tempo (hold Shift for 10)'),
+      row(['T'], 'Tap tempo'),
+      row(['\u2190', '\u2192'], 'Turn pages in sheet music'),
+      row(['Esc'], 'Close a panel'),
+      h('p', { class: 'muted small' }, 'Every button that repeats when held (tempo, reference pitch, octave) also works with a single tap. The tempo dial can be spun with a finger, a mouse wheel or the arrow keys.'),
+    ),
+  );
+}
+
+const topbar = h(
+  'header',
+  { class: 'topbar' },
+  h('span', { class: 'logo-mark small', 'aria-hidden': 'true' }),
+  title,
+  h('div', { class: 'topbar-end' }, sessionChip, tuningChip, iconButton('help', 'Shortcuts and tips', openHelp)),
+);
+
+/* ---------- Mini transport dock ---------- */
+
+const dockPlay = h('button', { class: 'dock-play', onclick: () => metronome.toggle(), 'aria-label': 'Start metronome' });
+const dockBpm = h('a', { class: 'dock-bpm', href: '#/metronome', 'aria-label': 'Open metronome' });
+const dockBeats = h('div', { class: 'dock-beats', 'aria-hidden': 'true' });
+const dockDrones = h('div', { class: 'dock-drones' });
+const dock = h(
+  'div',
+  { class: 'dock', role: 'region', 'aria-label': 'Quick metronome' },
+  dockPlay,
+  holdButton(icon('minus', 16), 'Slower', () => setMetronome({ bpm: getSettings().metronome.bpm - 1 }), 'dock-step'),
+  dockBpm,
+  holdButton(icon('plus', 16), 'Faster', () => setMetronome({ bpm: getSettings().metronome.bpm + 1 }), 'dock-step'),
+  dockBeats,
+  dockDrones,
+);
+
+function renderDock() {
+  const m = getSettings().metronome;
+  dockPlay.replaceChildren(icon(metronome.playing ? 'stop' : 'play', 18));
+  dockPlay.setAttribute('aria-label', metronome.playing ? 'Stop metronome' : 'Start metronome');
+  dock.classList.toggle('playing', metronome.playing);
+  dockBpm.replaceChildren(h('b', null, String(metronome.settings.bpm)), h('span', null, `BPM · ${m.beatsPerBar}/${m.beatUnit}`));
+  if (dockBeats.children.length !== m.beatsPerBar) dockBeats.replaceChildren(...Array.from({ length: m.beatsPerBar }, () => h('i')));
+  const notes = activeNotes();
+  dockDrones.replaceChildren(
+    ...(notes.length
+      ? [h('button', { class: 'dock-drone', onclick: stopAll, 'aria-label': 'Stop all drones' }, icon('sound', 14), notes.slice(0, 3).map((n) => noteName(n, getSettings().flats)).join(' '), notes.length > 3 ? '…' : '', icon('close', 12))]
+      : []),
+  );
+}
+metronome.onState(renderDock);
+metronome.onBeat((e) => {
+  if (e.sub !== 0) return;
+  [...dockBeats.children].forEach((c, i) => c.classList.toggle('on', i === e.beat));
+  if (e.beat === 0) renderDock();
+});
+onDronesChange(renderDock);
+subscribeSettings(() => {
+  renderDock();
+  renderTuningChip();
+});
+
+/* ---------- Mount ---------- */
+
+const outlet = h('main', { id: 'main', tabindex: '-1' });
 document.getElementById('app')!.replaceChildren(
   h('a', { class: 'skip', href: '#main', onclick: (e: Event) => { e.preventDefault(); outlet.focus(); } }, 'Skip to content'),
-  h('header', { class: 'topbar' }, h('span', { class: 'brand' }, 'Resonare'), heading),
-  statusBar,
-  outlet,
-  nav,
+  rail,
+  h('div', { class: 'app-main' }, topbar, outlet),
+  dock,
+  tabbar,
 );
+renderTuningChip();
+renderDock();
 
 startRouter(routes, outlet, (route) => {
-  heading.textContent = route.label;
-  nav.querySelectorAll('a').forEach((a) => {
+  title.textContent = route.label;
+  document.body.dataset.route = route.path;
+  document.querySelectorAll<HTMLAnchorElement>('.rail-link, .tab-link[data-path]').forEach((a) => {
     const on = a.dataset.path === route.path;
     a.classList.toggle('active', on);
     if (on) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
-  renderStatus();
+  moreBtn.classList.toggle('active', !(route as AppRoute).primary);
 });
+
+/* ---------- First run ---------- */
+
+if (!getSettings().seenIntro) {
+  const point = (name: IconName, head: string, text: string) => h('div', { class: 'intro-point' }, h('span', { class: 'intro-icon' }, icon(name, 22)), h('div', null, h('b', null, head), h('p', null, text)));
+  openSheet(
+    'Welcome to Resonare',
+    h(
+      'div',
+      { class: 'stack' },
+      h('p', { class: 'lead' }, 'A free practice studio: tuner, metronome, drones, recording, analysis and sheet music. Nothing to sign up for, and nothing leaves your device.'),
+      point('tuner', 'Tap the ring to tune', 'Hold a note in tune and the inner ring fills. It works while the metronome plays, too.'),
+      point('metronome', 'Spin the dial', 'Drag around the tempo dial, tap beats to accent them, and keep the mini metronome handy on every screen.'),
+      point('sound', 'Play drones', 'Tap notes on the wheel to sustain reference pitches for intonation practice.'),
+      h('button', { class: 'primary pill-btn wide', onclick: () => document.querySelector<HTMLButtonElement>('.sheet-head .icon-btn')?.click() }, 'Start practising'),
+    ),
+    { onClose: () => updateSettings({ seenIntro: true }) },
+  );
+}
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {

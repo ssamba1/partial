@@ -3,7 +3,6 @@ export type Cleanup = () => void;
 export interface Route {
   path: string;
   label: string;
-  icon: string;
   mount: (root: HTMLElement) => Cleanup | void;
 }
 
