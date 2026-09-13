@@ -128,6 +128,16 @@ npm run preview   # serve the production build
 
 Microphone access needs `https` or `localhost`.
 
+### Browser support
+
+Minimum versions come from checking the features the app uses against MDN's
+browser-compat-data 8.1.1, not from running those browsers. The floor is set by
+CSS `color-mix()`: Chrome and Edge 111, Safari and iOS Safari 16.2, Firefox 113.
+Some features degrade instead of breaking: MIDI pedals need Chrome, Edge or
+desktop Firefox 108+ (not Safari); vibration feedback is absent on Safari;
+full-screen sheet music is hidden where the browser does not allow it (iPhone).
+Only Chrome and Edge have actually been tested.
+
 ### Layout
 
 ```

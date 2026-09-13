@@ -243,7 +243,10 @@ export function mountSheetMusic(root: HTMLElement) {
         h('button', { class: 'tool-btn', onclick: () => go(-1), 'aria-label': 'Previous page' }, icon('chevronLeft', 18)),
         pageLabel,
         h('button', { class: 'tool-btn', onclick: () => go(1), 'aria-label': 'Next page' }, icon('chevronRight', 18)),
-        h('button', { class: 'tool-btn', title: 'Full screen', 'aria-label': 'Full screen', onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void viewerEl.requestFullscreen?.()) }, icon('fullscreen', 18)),
+        // iPhone Safari only allows full screen for video, so the button is left out where it would do nothing.
+        document.fullscreenEnabled
+          ? h('button', { class: 'tool-btn', title: 'Full screen', 'aria-label': 'Full screen', onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void viewerEl.requestFullscreen?.()) }, icon('fullscreen', 18))
+          : null,
       ),
     ),
     inkBar,

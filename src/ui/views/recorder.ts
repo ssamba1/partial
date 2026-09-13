@@ -226,6 +226,8 @@ export function mountRecorder(root: HTMLElement) {
       ? h('video', { src: url, preload: 'metadata', playsInline: true, class: 'take-video' })
       : h('audio', { src: url, preload: 'metadata' })) as HTMLMediaElement;
     audio.preservesPitch = true;
+    // Safari before 17.2 only knows the prefixed name; without it slower playback also drops in pitch.
+    (audio as HTMLMediaElement & { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
     const playBtn = h('button', { class: 'take-play', 'aria-label': `Play ${item.name}` }, icon('play', 18));
     const progress = h('input', { type: 'range', min: 0, max: 1000, value: '0', class: 'take-progress', 'aria-label': 'Playback position' }) as HTMLInputElement;
     const clock = h('span', { class: 'take-clock' }, `0:00 / ${formatDuration(item.duration)}`);
