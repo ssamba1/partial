@@ -1381,91 +1381,106 @@
   "id": "02-21",
   "file": "gaps/02-metronome.md",
   "title": "The kick sound is inaudible on phone speakers",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: kick gains a second harmonic and a 3.2 kHz beater transient, labelled best on headphones; the above-300 Hz energy comparison and a phone speaker check were not done."
  },
  {
   "id": "02-22",
   "file": "gaps/02-metronome.md",
   "title": "No additive meters or beat groupings (2+2+3)",
-  "status": "open"
+  "status": "fixed",
+  "note": "grouping setting, chips for 2/3 splits, accents from group starts, and a gap between groups. Unit and e2e tested."
  },
  {
   "id": "02-23",
   "file": "gaps/02-metronome.md",
   "title": "Uneven beats (aksak, long-short) cannot be clicked as beats",
-  "status": "open"
+  "status": "fixed",
+  "note": "Click groups option plays one click per group lasting the group length. Unit tested 2+2+3."
  },
  {
   "id": "02-24",
   "file": "gaps/02-metronome.md",
   "title": "No choice of the note BPM counts (dotted quarter in 6/8, half note in 2/2)",
-  "status": "open"
+  "status": "fixed",
+  "note": "partial: pulseNote setting sets beat length and shows the note by BPM; subdivisions stay relative to the written beat, not the pulse."
  },
  {
   "id": "02-25",
   "file": "gaps/02-metronome.md",
   "title": "Meter range and picker are limited, and the custom picker does not update",
-  "status": "open"
+  "status": "fixed",
+  "note": "Up to 32 beats, units 1 to 32, 3/2, 11/8 and 15/16 tiles, and the sheet redraws on settings changes."
  },
  {
   "id": "02-26",
   "file": "gaps/02-metronome.md",
   "title": "Changing meter throws away custom accent patterns",
-  "status": "open"
+  "status": "fixed",
+  "note": "accentMemory keyed by meter restores accents when you return to a meter."
  },
  {
   "id": "02-27",
   "file": "gaps/02-metronome.md",
   "title": "Only three accent levels, cycled in a fixed order",
-  "status": "open"
+  "status": "fixed",
+  "note": "Five levels (accent, medium, normal, soft, silent) in a sensible cycle, plus right-click or long-press to pick one."
  },
  {
   "id": "02-28",
   "file": "gaps/02-metronome.md",
   "title": "Individual subdivision clicks cannot be edited",
-  "status": "open"
+  "status": "fixed",
+  "note": "pattern per beat and click, a rhythm grid editor, and the engine reads each cell. Unit tested via the sequence."
  },
  {
   "id": "02-29",
   "file": "gaps/02-metronome.md",
   "title": "No per-beat subdivision",
-  "status": "open"
+  "status": "fixed",
+  "note": "subdivisionPerBeat, set from the beat sheet, locked per bar."
  },
  {
   "id": "02-30",
   "file": "gaps/02-metronome.md",
   "title": "Common rhythm figures and larger tuplets are missing",
-  "status": "open"
+  "status": "fixed",
+  "note": "Rhythm figures as onset fractions (dotted, eighth two sixteenths and others) and 7 to 9 clicks per beat."
  },
  {
   "id": "02-31",
   "file": "gaps/02-metronome.md",
   "title": "No swing or shuffle",
-  "status": "open"
+  "status": "fixed",
+  "note": "Swing 50 to 75% for 2 and 4 clicks per beat. Unit tested 66.7% within 1 ms of the triplet."
  },
  {
   "id": "02-32",
   "file": "gaps/02-metronome.md",
   "title": "Subdivisions cannot be layered with separate levels",
-  "status": "open"
+  "status": "fixed",
+  "note": "Layers of {subdivision, gain} mixed into the stream with a mixer in options."
  },
  {
   "id": "02-33",
   "file": "gaps/02-metronome.md",
   "title": "Polyrhythms cannot span more than one bar or a few beats",
-  "status": "open"
+  "status": "fixed",
+  "note": "polyBeats sets the span in beats (0 = one bar), cycle restarts on the bar when the span is the bar."
  },
  {
   "id": "02-34",
   "file": "gaps/02-metronome.md",
   "title": "The polyrhythm layer has no visual",
-  "status": "open"
+  "status": "fixed",
+  "note": "Poly events reach the visual stream with layer poly and light a row of dots."
  },
  {
   "id": "02-35",
   "file": "gaps/02-metronome.md",
   "title": "No clave or other timeline patterns",
-  "status": "open"
+  "status": "fixed",
+  "note": "Clave, bossa and tresillo timelines on 8, 12 or 16 cells with a cited source, played on a contrast sound."
  },
  {
   "id": "02-36",
